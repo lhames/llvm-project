@@ -785,6 +785,7 @@ class AsynchronousSymbolQuery {
   friend class ExecutionSession;
   friend class JITDylib;
   friend class JITSymbolResolverAdapter;
+  friend class MaterializationResponsibility;
 
 public:
   /// Create a query for the given symbols. The NotifyComplete
@@ -1092,7 +1093,9 @@ private:
   JITDylib(ExecutionSession &ES, std::string Name);
 
   ResourceTrackerSPX getTracker(MaterializationResponsibility &MR);
-  AsynchronousSymbolQuerySet removeTracker(ResourceTracker &RT);
+  std::pair<AsynchronousSymbolQuerySet, std::shared_ptr<SymbolDependenceMap>>
+  removeTracker(ResourceTracker &RT);
+
   void transferTracker(ResourceTracker &DstRT, ResourceTracker &SrcRT);
 
   Error defineImpl(MaterializationUnit &MU);
@@ -1135,15 +1138,18 @@ private:
   void addDependencies(const SymbolStringPtr &Name,
                        const SymbolDependenceMap &Dependants);
 
-  Error resolve(const SymbolMap &Resolved);
+  Error resolve(MaterializationResponsibility &MR, const SymbolMap &Resolved);
 
-  Error emit(const SymbolFlagsMap &Emitted);
+  Error emit(MaterializationResponsibility &MR, const SymbolFlagsMap &Emitted);
 
   void unlinkMaterializationResponsibility(MaterializationResponsibility &MR);
 
   using FailedSymbolsWorklist =
       std::vector<std::pair<JITDylib *, SymbolStringPtr>>;
-  static void notifyFailed(FailedSymbolsWorklist FailedSymbols);
+
+  static std::pair<AsynchronousSymbolQuerySet,
+                   std::shared_ptr<SymbolDependenceMap>>
+      failSymbols(FailedSymbolsWorklist);
 
   ExecutionSession &ES;
   std::string JITDylibName;

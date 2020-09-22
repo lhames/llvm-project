@@ -32,19 +32,32 @@ public:
   using RecordedResourcesMap = DenseMap<ResourceKey, ResourceT>;
 
   SimpleResourceManager(
-      ExecutionSession &ES, HandleRemoveFunction HandleRemove,
+      ExecutionSession &ES,
+      HandleRemoveFunction HandleRemove = HandleRemoveFunction(),
       HandleTransferFunction HandleTransfer = HandleTransferFunction())
       : ES(ES), HandleRemove(std::move(HandleRemove)),
         HandleTransfer(std::move(HandleTransfer)) {
 
+    // If HandleRemvoe is not supplied then use the default.
+    if (!this->HandleRemove)
+      this->HandleRemove = [&](ResourceKey K) -> Error {
+        ES.runSessionLocked([&] { removeResource(K); });
+        return Error::success();
+      };
+
     // If HandleTransfer is not supplied then use the default.
-    if (!HandleTransfer)
-      HandleTransfer = [this](ResourceKey DstKey, ResourceKey SrcKey) {
+    if (!this->HandleTransfer)
+      this->HandleTransfer = [this](ResourceKey DstKey, ResourceKey SrcKey) {
         transferResources(DstKey, SrcKey);
       };
 
     ES.registerResourceManager(*this);
   }
+
+  SimpleResourceManager(const SimpleResourceManager &) = delete;
+  SimpleResourceManager &operator=(const SimpleResourceManager &) = delete;
+  SimpleResourceManager(SimpleResourceManager &&) = delete;
+  SimpleResourceManager &operator=(SimpleResourceManager &&) = delete;
 
   ~SimpleResourceManager() { ES.deregisterResourceManager(*this); }
 
@@ -95,16 +108,14 @@ private:
 };
 
 TEST_F(ResourceTrackerStandardTest,
-       BasicDefineAndRemoveWithoutMaterialization) {
+       BasicDefineAndRemoveAllBeforeMaterializing) {
 
   bool ResourceManagerGotRemove = false;
   SimpleResourceManager<> SRM(ES, [&](ResourceKey K) -> Error {
-    ES.runSessionLocked([&]() {
-      ResourceManagerGotRemove = true;
-      EXPECT_EQ(SRM.getRecordedResources().size(), 0U)
-          << "Unexpected resources recorded";
-      SRM.removeResource(K);
-    });
+    ResourceManagerGotRemove = true;
+    EXPECT_EQ(SRM.getRecordedResources().size(), 0U)
+        << "Unexpected resources recorded";
+    SRM.removeResource(K);
     return Error::success();
   });
 
@@ -120,48 +131,143 @@ TEST_F(ResourceTrackerStandardTest,
   auto RT = JD.createResourceTracker();
   cantFail(JD.define(std::move(MU), RT));
   cantFail(RT->remove());
+  auto SymFlags = cantFail(JD.lookupFlags(
+      LookupKind::Static, JITDylibLookupFlags::MatchExportedSymbolsOnly,
+      SymbolLookupSet(Foo)));
 
+  EXPECT_EQ(SymFlags.size(), 0U)
+      << "Symbols should have been removed from the symbol table";
   EXPECT_TRUE(ResourceManagerGotRemove)
       << "ResourceManager did not receive handleRemoveResources";
   EXPECT_TRUE(MaterializationUnitDestroyed)
       << "MaterializationUnit not destroyed in response to removal";
 }
 
-TEST_F(ResourceTrackerStandardTest, BasicDefineAndRemoveWithMaterialization) {
+TEST_F(ResourceTrackerStandardTest, BasicDefineAndRemoveAllAfterMaterializing) {
 
   bool ResourceManagerGotRemove = false;
   SimpleResourceManager<> SRM(ES, [&](ResourceKey K) -> Error {
-    ES.runSessionLocked([&]() {
-      ResourceManagerGotRemove = true;
-      EXPECT_EQ(SRM.getRecordedResources().size(), 1U)
-          << "Unexpected number of resources recorded";
-      EXPECT_EQ(SRM.getRecordedResources().count(K), 1U)
-          << "Unexpected recorded resource";
-      SRM.removeResource(K);
-    });
+    ResourceManagerGotRemove = true;
+    EXPECT_EQ(SRM.getRecordedResources().size(), 1U)
+        << "Unexpected number of resources recorded";
+    EXPECT_EQ(SRM.getRecordedResources().count(K), 1U)
+        << "Unexpected recorded resource";
+    SRM.removeResource(K);
     return Error::success();
   });
 
-  bool MaterializationUnitDestroyed = false;
   auto MU = std::make_unique<SimpleMaterializationUnit>(
       SymbolFlagsMap({{Foo, FooSym.getFlags()}}),
       [&](std::unique_ptr<MaterializationResponsibility> R) {
         R->withResourceKeyDo([&](ResourceKey K) { SRM.recordResource(K); });
         cantFail(R->notifyResolved({{Foo, FooSym}}));
         cantFail(R->notifyEmitted());
-      },
-      nullptr, SimpleMaterializationUnit::DiscardFunction(),
-      [&]() { MaterializationUnitDestroyed = true; });
+      });
 
   auto RT = JD.createResourceTracker();
   cantFail(JD.define(std::move(MU), RT));
   cantFail(ES.lookup({&JD}, Foo));
   cantFail(RT->remove());
+  auto SymFlags = cantFail(JD.lookupFlags(
+      LookupKind::Static, JITDylibLookupFlags::MatchExportedSymbolsOnly,
+      SymbolLookupSet(Foo)));
 
+  EXPECT_EQ(SymFlags.size(), 0U)
+      << "Symbols should have been removed from the symbol table";
   EXPECT_TRUE(ResourceManagerGotRemove)
       << "ResourceManager did not receive handleRemoveResources";
-  EXPECT_TRUE(MaterializationUnitDestroyed)
-      << "MaterializationUnit not destroyed in response to removal";
+}
+
+TEST_F(ResourceTrackerStandardTest, BasicDefineAndRemoveAllWhileMaterializing) {
+
+  bool ResourceManagerGotRemove = false;
+  SimpleResourceManager<> SRM(ES, [&](ResourceKey K) -> Error {
+    ResourceManagerGotRemove = true;
+    EXPECT_EQ(SRM.getRecordedResources().size(), 0U)
+        << "Unexpected resources recorded";
+    SRM.removeResource(K);
+    return Error::success();
+  });
+
+  std::unique_ptr<MaterializationResponsibility> MR;
+  auto MU = std::make_unique<SimpleMaterializationUnit>(
+      SymbolFlagsMap({{Foo, FooSym.getFlags()}}),
+      [&](std::unique_ptr<MaterializationResponsibility> R) {
+        MR = std::move(R);
+      });
+
+  auto RT = JD.createResourceTracker();
+  cantFail(JD.define(std::move(MU), RT));
+
+  ES.lookup(
+      LookupKind::Static, makeJITDylibSearchOrder(&JD), SymbolLookupSet(Foo),
+      SymbolState::Ready,
+      [](Expected<SymbolMap> Result) {
+        EXPECT_THAT_EXPECTED(Result, Failed<FailedToMaterialize>())
+            << "Lookup failed unexpectedly";
+      },
+      NoDependenciesToRegister);
+
+  cantFail(RT->remove());
+  auto SymFlags = cantFail(JD.lookupFlags(
+      LookupKind::Static, JITDylibLookupFlags::MatchExportedSymbolsOnly,
+      SymbolLookupSet(Foo)));
+
+  EXPECT_EQ(SymFlags.size(), 0U)
+      << "Symbols should have been removed from the symbol table";
+  EXPECT_TRUE(ResourceManagerGotRemove)
+      << "ResourceManager did not receive handleRemoveResources";
+
+  // TODO: Plumb ResourceTrackerDefunct error, test for that explicitly below
+  // (rather than just "failed")..
+  EXPECT_THAT_ERROR(MR->notifyResolved({{Foo, FooSym}}), Failed())
+      << "notifyResolved on MR with remove tracker should have failed";
+
+  MR->failMaterialization();
+}
+
+TEST_F(ResourceTrackerStandardTest, JITDylibClear) {
+  SimpleResourceManager<> SRM(ES);
+
+  // Add materializer for Foo.
+  cantFail(JD.define(std::make_unique<SimpleMaterializationUnit>(
+      SymbolFlagsMap({{Foo, FooSym.getFlags()}}),
+      [&](std::unique_ptr<MaterializationResponsibility> R) {
+        R->withResourceKeyDo(
+            [&](ResourceKey K) { ++SRM.getRecordedResources()[K]; });
+        cantFail(R->notifyResolved({{Foo, FooSym}}));
+        cantFail(R->notifyEmitted());
+      })));
+
+  // Add materializer for Bar.
+  cantFail(JD.define(std::make_unique<SimpleMaterializationUnit>(
+      SymbolFlagsMap({{Bar, BarSym.getFlags()}}),
+      [&](std::unique_ptr<MaterializationResponsibility> R) {
+        R->withResourceKeyDo(
+            [&](ResourceKey K) { ++SRM.getRecordedResources()[K]; });
+        cantFail(R->notifyResolved({{Bar, BarSym}}));
+        cantFail(R->notifyEmitted());
+      })));
+
+  EXPECT_TRUE(SRM.getRecordedResources().empty())
+      << "Expected no resources recorded yet.";
+
+  cantFail(
+      ES.lookup(makeJITDylibSearchOrder(&JD), SymbolLookupSet({Foo, Bar})));
+
+  auto JDResourceKey = JD.getDefaultResourceTracker()->getKeyUnsafe();
+  EXPECT_EQ(SRM.getRecordedResources().size(), 1U)
+      << "Expected exactly one entry (for JD's ResourceKey)";
+  EXPECT_EQ(SRM.getRecordedResources().count(JDResourceKey), 1U)
+      << "Expected an entry for JD's ResourceKey";
+  EXPECT_EQ(SRM.getRecordedResources()[JDResourceKey], 2U)
+      << "Expected value of 2 for JD's ResourceKey "
+         "(+1 for each of Foo and Bar)";
+
+  cantFail(JD.clear());
+
+  EXPECT_TRUE(SRM.getRecordedResources().empty())
+      << "Expected no resources recorded after clear";
 }
 
 } // namespace
