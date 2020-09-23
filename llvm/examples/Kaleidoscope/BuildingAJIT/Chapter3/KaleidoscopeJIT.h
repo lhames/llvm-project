@@ -43,14 +43,13 @@ private:
   std::unique_ptr<ExecutionSession> ES;
   std::unique_ptr<TPCIndirectionUtils> TPCIU;
 
+  DataLayout DL;
+  MangleAndInterner Mangle;
+
   RTDyldObjectLinkingLayer ObjectLayer;
   IRCompileLayer CompileLayer;
   IRTransformLayer OptimizeLayer;
   CompileOnDemandLayer CODLayer;
-
-  DataLayout DL;
-  MangleAndInterner Mangle;
-  ThreadSafeContext Ctx;
 
   JITDylib &MainJD;
 
@@ -66,6 +65,7 @@ public:
                   std::unique_ptr<TPCIndirectionUtils> TPCIU,
                   JITTargetMachineBuilder JTMB, DataLayout DL)
       : TPC(std::move(TPC)), ES(std::move(ES)), TPCIU(std::move(TPCIU)),
+        DL(std::move(DL)), Mangle(*this->ES, this->DL),
         ObjectLayer(*this->ES,
                     []() { return std::make_unique<SectionMemoryManager>(); }),
         CompileLayer(*this->ES, ObjectLayer,
@@ -74,8 +74,6 @@ public:
         CODLayer(*this->ES, OptimizeLayer,
                  this->TPCIU->getLazyCallThroughManager(),
                  [this] { return this->TPCIU->createIndirectStubsManager(); }),
-        DL(std::move(DL)),
-        Mangle(*this->ES, this->DL), Ctx(std::make_unique<LLVMContext>()),
         MainJD(this->ES->createBareJITDylib("<main>")) {
     MainJD.addGenerator(
         cantFail(DynamicLibrarySearchGenerator::GetForCurrentProcess(
@@ -119,15 +117,13 @@ public:
 
   const DataLayout &getDataLayout() const { return DL; }
 
-  LLVMContext &getContext() { return *Ctx.getContext(); }
-
   JITDylib &getMainJITDylib() { return MainJD; }
 
-  Error addModule(std::unique_ptr<Module> M, ResourceTrackerSPX RT = nullptr) {
+  Error addModule(ThreadSafeModule TSM, ResourceTrackerSPX RT = nullptr) {
     if (!RT)
       RT = MainJD.getDefaultResourceTracker();
 
-    return OptimizeLayer.add(RT, ThreadSafeModule(std::move(M), Ctx));
+    return OptimizeLayer.add(RT, std::move(TSM));
   }
 
   Expected<JITEvaluatedSymbol> lookup(StringRef Name) {

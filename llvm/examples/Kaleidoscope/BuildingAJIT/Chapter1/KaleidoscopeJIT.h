@@ -35,12 +35,11 @@ private:
   std::unique_ptr<TargetProcessControl> TPC;
   std::unique_ptr<ExecutionSession> ES;
 
-  RTDyldObjectLinkingLayer ObjectLayer;
-  IRCompileLayer CompileLayer;
-
   DataLayout DL;
   MangleAndInterner Mangle;
-  ThreadSafeContext Ctx;
+
+  RTDyldObjectLinkingLayer ObjectLayer;
+  IRCompileLayer CompileLayer;
 
   JITDylib &MainJD;
 
@@ -50,12 +49,11 @@ public:
                   std::unique_ptr<ExecutionSession> ES,
                   JITTargetMachineBuilder JTMB, DataLayout DL)
       : TPC(std::move(TPC)), ES(std::move(ES)),
+        DL(std::move(DL)), Mangle(*this->ES, this->DL),
         ObjectLayer(*this->ES,
                     []() { return std::make_unique<SectionMemoryManager>(); }),
         CompileLayer(*this->ES, ObjectLayer,
                      std::make_unique<ConcurrentIRCompiler>(std::move(JTMB))),
-        DL(std::move(DL)), Mangle(*this->ES, this->DL),
-        Ctx(std::make_unique<LLVMContext>()),
         MainJD(this->ES->createBareJITDylib("<main>")) {
     MainJD.addGenerator(
         cantFail(DynamicLibrarySearchGenerator::GetForCurrentProcess(
@@ -86,14 +84,12 @@ public:
 
   const DataLayout &getDataLayout() const { return DL; }
 
-  LLVMContext &getContext() { return *Ctx.getContext(); }
-
   JITDylib &getMainJITDylib() { return MainJD; }
 
-  Error addModule(std::unique_ptr<Module> M, ResourceTrackerSPX RT = nullptr) {
+  Error addModule(ThreadSafeModule TSM, ResourceTrackerSPX RT = nullptr) {
     if (!RT)
       RT = MainJD.getDefaultResourceTracker();
-    return CompileLayer.add(RT, ThreadSafeModule(std::move(M), Ctx));
+    return CompileLayer.add(RT, std::move(TSM));
   }
 
   Expected<JITEvaluatedSymbol> lookup(StringRef Name) {

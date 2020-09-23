@@ -697,7 +697,7 @@ static std::unique_ptr<PrototypeAST> ParseExtern() {
 //===----------------------------------------------------------------------===//
 
 static std::unique_ptr<KaleidoscopeJIT> TheJIT;
-static LLVMContext *TheContext;
+static std::unique_ptr<LLVMContext> TheContext;
 static std::unique_ptr<IRBuilder<>> Builder;
 static std::unique_ptr<Module> TheModule;
 static std::map<std::string, AllocaInst *> NamedValues;
@@ -1102,7 +1102,8 @@ Function *FunctionAST::codegen() {
 //===----------------------------------------------------------------------===//
 
 static void InitializeModule() {
-  // Open a new module.
+  // Open a new context and module.
+  TheContext = std::make_unique<LLVMContext>();
   TheModule = std::make_unique<Module>("my cool jit", *TheContext);
   TheModule->setDataLayout(TheJIT->getDataLayout());
 
@@ -1116,7 +1117,8 @@ static void HandleDefinition() {
       fprintf(stderr, "Read function definition:");
       FnIR->print(errs());
       fprintf(stderr, "\n");
-      ExitOnErr(TheJIT->addModule(std::move(TheModule)));
+      auto TSM = ThreadSafeModule(std::move(TheModule), std::move(TheContext));
+      ExitOnErr(TheJIT->addModule(std::move(TSM)));
       InitializeModule();
     }
   } else {
@@ -1147,7 +1149,8 @@ static void HandleTopLevelExpression() {
       // anonymous expression -- that way we can free it after executing.
       auto RT = TheJIT->getMainJITDylib().createResourceTracker();
 
-      ExitOnErr(TheJIT->addModule(std::move(TheModule), RT));
+      auto TSM = ThreadSafeModule(std::move(TheModule), std::move(TheContext));
+      ExitOnErr(TheJIT->addModule(std::move(TSM), RT));
       InitializeModule();
 
       // Get the anonymous expression's JITSymbol.
@@ -1227,8 +1230,6 @@ int main() {
   getNextToken();
 
   TheJIT = ExitOnErr(KaleidoscopeJIT::Create());
-  TheContext = &TheJIT->getContext();
-
   InitializeModule();
 
   // Run the main "interpreter loop" now.
