@@ -676,11 +676,11 @@ static std::unique_ptr<FunctionAST> ParseDefinition() {
 }
 
 /// toplevelexpr ::= expression
-static std::unique_ptr<FunctionAST> ParseTopLevelExpr(unsigned ExprCount) {
+static std::unique_ptr<FunctionAST> ParseTopLevelExpr() {
   if (auto E = ParseExpression()) {
     // Make an anonymous proto.
-    auto Proto = std::make_unique<PrototypeAST>
-        (("__anon_expr" + Twine(ExprCount)).str(), std::vector<std::string>());
+    auto Proto = std::make_unique<PrototypeAST>(
+        "__anon_expr", std::vector<std::string>());
     return std::make_unique<FunctionAST>(std::move(Proto), std::move(E));
   }
   return nullptr;
@@ -1140,27 +1140,25 @@ static void HandleExtern() {
 }
 
 static void HandleTopLevelExpression() {
-  static unsigned ExprCount = 0;
-
-  // Update ExprCount. This number will be added to anonymous expressions to
-  // prevent them from clashing.
-  ++ExprCount;
-
   // Evaluate a top-level expression into an anonymous function.
-  if (auto FnAST = ParseTopLevelExpr(ExprCount)) {
+  if (auto FnAST = ParseTopLevelExpr()) {
     if (FnAST->codegen()) {
-      // JIT the module containing the anonymous expression, keeping a handle so
-      // we can free it later.
-      ExitOnErr(TheJIT->addModule(std::move(TheModule)));
+      // Create a ResourceTracker to track JIT'd memory allocated to our
+      // anonymous expression -- that way we can free it after executing.
+      auto RT = TheJIT->getMainJITDylib().createResourceTracker();
+
+      ExitOnErr(TheJIT->addModule(std::move(TheModule), RT));
       InitializeModule();
 
       // Get the anonymous expression's JITSymbol.
       auto Sym =
-          ExitOnErr(TheJIT->lookup(("__anon_expr" + Twine(ExprCount)).str()));
+        ExitOnErr(TheJIT->lookup("__anon_expr"));
 
       auto *FP = (double (*)())(intptr_t)Sym.getAddress();
       assert(FP && "Failed to codegen function");
       fprintf(stderr, "Evaluated to %f\n", FP());
+
+      ExitOnErr(RT->remove());
     }
   } else {
     // Skip token for error recovery.
