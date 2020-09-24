@@ -1154,13 +1154,14 @@ static void HandleTopLevelExpression() {
       InitializeModule();
 
       // Get the anonymous expression's JITSymbol.
-      auto Sym =
-        ExitOnErr(TheJIT->lookup("__anon_expr"));
+      auto Sym = ExitOnErr(TheJIT->lookup("__anon_expr"));
 
+      // Get the symbol's address and cast it to the right type (takes no
+      // arguments, returns a double) so we can call it as a native function.
       auto *FP = (double (*)())(intptr_t)Sym.getAddress();
-      assert(FP && "Failed to codegen function");
       fprintf(stderr, "Evaluated to %f\n", FP());
 
+      // Delete the anonymous expression module from the JIT.
       ExitOnErr(RT->remove());
     }
   } else {
