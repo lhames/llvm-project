@@ -91,7 +91,7 @@ public:
   KaleidoscopeASTLayer(IRLayer &BaseLayer, const DataLayout &DL)
       : BaseLayer(BaseLayer), DL(DL) {}
 
-  Error add(ResourceTrackerSPX RT, std::unique_ptr<FunctionAST> F) {
+  Error add(ResourceTrackerSP RT, std::unique_ptr<FunctionAST> F) {
     return RT->getJITDylib().define(
         std::make_unique<KaleidoscopeASTMaterializationUnit>(*this,
                                                              std::move(F)),
@@ -205,14 +205,14 @@ public:
 
   JITDylib &getMainJITDylib() { return MainJD; }
 
-  Error addModule(ThreadSafeModule TSM, ResourceTrackerSPX RT = nullptr) {
+  Error addModule(ThreadSafeModule TSM, ResourceTrackerSP RT = nullptr) {
     if (!RT)
       RT = MainJD.getDefaultResourceTracker();
 
     return OptimizeLayer.add(RT, std::move(TSM));
   }
 
-  Error addAST(std::unique_ptr<FunctionAST> F, ResourceTrackerSPX RT = nullptr) {
+  Error addAST(std::unique_ptr<FunctionAST> F, ResourceTrackerSP RT = nullptr) {
     if (!RT)
       RT = MainJD.getDefaultResourceTracker();
     return ASTLayer.add(RT, std::move(F));

@@ -64,7 +64,7 @@ void ResourceTracker::makeDefunct() {
 
 ResourceManager::~ResourceManager() {}
 
-ResourceTrackerDefunct::ResourceTrackerDefunct(ResourceTrackerSPX RT)
+ResourceTrackerDefunct::ResourceTrackerDefunct(ResourceTrackerSP RT)
     : RT(std::move(RT)) {}
 
 std::error_code ResourceTrackerDefunct::convertToErrorCode() const {
@@ -656,7 +656,7 @@ Error ReexportsGenerator::tryToGenerate(LookupKind K, JITDylib &JD,
 JITDylib::DefinitionGenerator::~DefinitionGenerator() {}
 
 Error JITDylib::clear() {
-  std::vector<ResourceTrackerSPX> TrackersToRemove;
+  std::vector<ResourceTrackerSP> TrackersToRemove;
   ES.runSessionLocked([&]() {
     for (auto &KV : TrackerSymbols)
       TrackersToRemove.push_back(KV.first);
@@ -669,7 +669,7 @@ Error JITDylib::clear() {
   return Err;
 }
 
-ResourceTrackerSPX JITDylib::getDefaultResourceTracker() {
+ResourceTrackerSP JITDylib::getDefaultResourceTracker() {
   return ES.runSessionLocked([this] {
     if (!DefaultTracker)
       DefaultTracker = new ResourceTracker(this);
@@ -677,9 +677,9 @@ ResourceTrackerSPX JITDylib::getDefaultResourceTracker() {
   });
 }
 
-ResourceTrackerSPX JITDylib::createResourceTracker() {
+ResourceTrackerSP JITDylib::createResourceTracker() {
   return ES.runSessionLocked([this] {
-    ResourceTrackerSPX RT = new ResourceTracker(this);
+    ResourceTrackerSP RT = new ResourceTracker(this);
     return RT;
   });
 }
@@ -1638,7 +1638,7 @@ JITDylib::JITDylib(ExecutionSession &ES, std::string Name)
   LinkOrder.push_back({this, JITDylibLookupFlags::MatchAllSymbols});
 }
 
-ResourceTrackerSPX JITDylib::getTracker(MaterializationResponsibility &MR) {
+ResourceTrackerSP JITDylib::getTracker(MaterializationResponsibility &MR) {
   auto I = MRTrackers.find(&MR);
   assert(I != MRTrackers.end() && "MR is not linked");
   assert(I->second && "Linked tracker is null");

@@ -482,7 +482,7 @@ LLVMJITLinkObjectLinkingLayer::LLVMJITLinkObjectLinkingLayer(
     Session &S, JITLinkMemoryManager &MemMgr)
     : ObjectLinkingLayer(S.ES, MemMgr), S(S) {}
 
-Error LLVMJITLinkObjectLinkingLayer::add(ResourceTrackerSPX RT,
+Error LLVMJITLinkObjectLinkingLayer::add(ResourceTrackerSP RT,
                                          std::unique_ptr<MemoryBuffer> O) {
 
   if (S.HarnessFiles.empty() || S.HarnessFiles.count(O->getBufferIdentifier()))

@@ -22,7 +22,7 @@ namespace orc {
 
 IRLayer::~IRLayer() {}
 
-Error IRLayer::add(ResourceTrackerSPX RT, ThreadSafeModule TSM) {
+Error IRLayer::add(ResourceTrackerSP RT, ThreadSafeModule TSM) {
   assert(RT && "RT can not be null");
   auto &JD = RT->getJITDylib();
   return JD.define(std::make_unique<BasicIRLayerMaterializationUnit>(
@@ -159,7 +159,7 @@ ObjectLayer::ObjectLayer(ExecutionSession &ES) : ES(ES) {}
 
 ObjectLayer::~ObjectLayer() {}
 
-Error ObjectLayer::add(ResourceTrackerSPX RT, std::unique_ptr<MemoryBuffer> O) {
+Error ObjectLayer::add(ResourceTrackerSP RT, std::unique_ptr<MemoryBuffer> O) {
   assert(RT && "RT can not be null");
   auto ObjMU = BasicObjectLayerMaterializationUnit::Create(*this, std::move(O));
   if (!ObjMU)

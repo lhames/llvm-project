@@ -38,7 +38,7 @@ public:
   LLVMJITLinkObjectLinkingLayer(Session &S,
                                 jitlink::JITLinkMemoryManager &MemMgr);
 
-  Error add(orc::ResourceTrackerSPX RT,
+  Error add(orc::ResourceTrackerSP RT,
             std::unique_ptr<MemoryBuffer> O) override;
 
 private:

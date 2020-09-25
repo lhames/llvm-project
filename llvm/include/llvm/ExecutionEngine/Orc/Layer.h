@@ -96,7 +96,7 @@ public:
 
   /// Add a MaterializatinoUnit representing the given IR to the JITDylib
   /// targeted by the given tracker.
-  virtual Error add(ResourceTrackerSPX RT, ThreadSafeModule TSM);
+  virtual Error add(ResourceTrackerSP RT, ThreadSafeModule TSM);
 
   /// Adds a MaterializationUnit representing the given IR to the given
   /// JITDylib. If RT is not specif
@@ -139,7 +139,7 @@ public:
 
   /// Adds a MaterializationUnit representing the given IR to the given
   /// JITDylib.
-  virtual Error add(ResourceTrackerSPX RT, std::unique_ptr<MemoryBuffer> O);
+  virtual Error add(ResourceTrackerSP RT, std::unique_ptr<MemoryBuffer> O);
 
   Error add(JITDylib &JD, std::unique_ptr<MemoryBuffer> O) {
     return add(JD.getDefaultResourceTracker(), std::move(O));

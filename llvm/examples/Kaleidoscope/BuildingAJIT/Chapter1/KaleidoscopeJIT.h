@@ -86,7 +86,7 @@ public:
 
   JITDylib &getMainJITDylib() { return MainJD; }
 
-  Error addModule(ThreadSafeModule TSM, ResourceTrackerSPX RT = nullptr) {
+  Error addModule(ThreadSafeModule TSM, ResourceTrackerSP RT = nullptr) {
     if (!RT)
       RT = MainJD.getDefaultResourceTracker();
     return CompileLayer.add(RT, std::move(TSM));

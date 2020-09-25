@@ -39,7 +39,7 @@ class ResourceTracker;
 
 enum class SymbolState : uint8_t;
 
-using ResourceTrackerSPX = IntrusiveRefCntPtr<ResourceTracker>;
+using ResourceTrackerSP = IntrusiveRefCntPtr<ResourceTracker>;
 using JITDylibSP = IntrusiveRefCntPtr<JITDylib>;
 
 using ResourceKey = uintptr_t;
@@ -378,12 +378,12 @@ class ResourceTrackerDefunct : public ErrorInfo<ResourceTrackerDefunct> {
 public:
   static char ID;
 
-  ResourceTrackerDefunct(ResourceTrackerSPX RT);
+  ResourceTrackerDefunct(ResourceTrackerSP RT);
   std::error_code convertToErrorCode() const override;
   void log(raw_ostream &OS) const override;
 
 private:
-  ResourceTrackerSPX RT;
+  ResourceTrackerSP RT;
 };
 
 /// Used to notify a JITDylib that the given set of symbols failed to
@@ -882,10 +882,10 @@ public:
   Error clear();
 
   /// Get the default resource tracker for this JITDylib.
-  ResourceTrackerSPX getDefaultResourceTracker();
+  ResourceTrackerSP getDefaultResourceTracker();
 
   /// Create a resource tracker for this JITDylib.
-  ResourceTrackerSPX createResourceTracker();
+  ResourceTrackerSP createResourceTracker();
 
   /// Adds a definition generator to this JITDylib and returns a referenece to
   /// it.
@@ -953,7 +953,7 @@ public:
   /// errors occur, the MaterializationUnit consumed.
   template <typename MaterializationUnitType>
   Error define(std::unique_ptr<MaterializationUnitType> &&MU,
-               ResourceTrackerSPX RT = nullptr);
+               ResourceTrackerSP RT = nullptr);
 
   /// Define all symbols provided by the materialization unit to be part of this
   /// JITDylib.
@@ -964,7 +964,7 @@ public:
   /// issue, then re-call define.
   template <typename MaterializationUnitType>
   Error define(std::unique_ptr<MaterializationUnitType> &MU,
-               ResourceTrackerSPX RT = nullptr);
+               ResourceTrackerSP RT = nullptr);
 
   /// Tries to remove the given symbols.
   ///
@@ -1092,7 +1092,7 @@ private:
 
   JITDylib(ExecutionSession &ES, std::string Name);
 
-  ResourceTrackerSPX getTracker(MaterializationResponsibility &MR);
+  ResourceTrackerSP getTracker(MaterializationResponsibility &MR);
   std::pair<AsynchronousSymbolQuerySet, std::shared_ptr<SymbolDependenceMap>>
   removeTracker(ResourceTracker &RT);
 
@@ -1159,7 +1159,7 @@ private:
   MaterializingInfosMap MaterializingInfos;
   std::vector<std::unique_ptr<DefinitionGenerator>> DefGenerators;
   JITDylibSearchOrder LinkOrder;
-  ResourceTrackerSPX DefaultTracker;
+  ResourceTrackerSP DefaultTracker;
 
   // Map trackers to sets of symbols tracked.
   DenseMap<ResourceTracker *, SymbolNameVector> TrackerSymbols;
@@ -1443,7 +1443,7 @@ auto JITDylib::withLinkOrderDo(Func &&F)
 
 template <typename MaterializationUnitType>
 Error JITDylib::define(std::unique_ptr<MaterializationUnitType> &&MU,
-                       ResourceTrackerSPX RT) {
+                       ResourceTrackerSP RT) {
   assert(MU && "Can not define with a null MU");
 
   if (MU->getSymbols().empty()) {
@@ -1477,7 +1477,7 @@ Error JITDylib::define(std::unique_ptr<MaterializationUnitType> &&MU,
 
 template <typename MaterializationUnitType>
 Error JITDylib::define(std::unique_ptr<MaterializationUnitType> &MU,
-                       ResourceTrackerSPX RT) {
+                       ResourceTrackerSP RT) {
   assert(MU && "Can not define with a null MU");
 
   if (MU->getSymbols().empty()) {
