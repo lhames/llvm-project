@@ -62,9 +62,11 @@ public:
   ~SimpleResourceManager() { ES.deregisterResourceManager(*this); }
 
   /// Create an association between the given key and resource.
-  void recordResource(ResourceKey K, ResourceT Val = ResourceT()) {
-    assert(!Resources.count(K) && "Resource already recorded in this manager");
-    Resources[K] = std::move(Val);
+  template <typename MergeOp = std::plus<ResourceT>>
+  void recordResource(ResourceKey K, ResourceT Val = ResourceT(),
+                      MergeOp Merge = MergeOp()) {
+    auto Tmp = std::move(Resources[K]);
+    Resources[K] = Merge(std::move(Tmp), std::move(Val));
   }
 
   /// Remove the resource associated with K from the map if present.
@@ -268,6 +270,62 @@ TEST_F(ResourceTrackerStandardTest, JITDylibClear) {
 
   EXPECT_TRUE(SRM.getRecordedResources().empty())
       << "Expected no resources recorded after clear";
+}
+
+TEST_F(ResourceTrackerStandardTest,
+       BasicDefineAndExplicitTransferBeforeMaterializing) {
+
+  bool ResourceManagerGotTransfer = false;
+  SimpleResourceManager<> SRM(ES, [&](ResourceKey K) -> Error {
+      SRM.removeResource(K);
+      return Error::success();
+    },
+    [&](ResourceKey DstKey, ResourceKey SrcKey) {
+      ResourceManagerGotTransfer = true;
+      auto &RR = SRM.getRecordedResources();
+      EXPECT_EQ(RR.size(), 0U)
+        << "Expected no resources recorded yet";
+      });
+
+  auto MakeMU =
+    [&](SymbolStringPtr Name, JITEvaluatedSymbol Sym) {
+      return std::make_unique<SimpleMaterializationUnit>(
+          SymbolFlagsMap({{Name, Sym.getFlags()}}),
+          [=, &SRM](std::unique_ptr<MaterializationResponsibility> R) {
+            R->withResourceKeyDo([&](ResourceKey K) {
+              SRM.recordResource(K);
+            });
+            cantFail(R->notifyResolved({{Name, Sym}}));
+            cantFail(R->notifyEmitted());
+          });
+    };
+
+  auto FooRT = JD.createResourceTracker();
+  cantFail(JD.define(MakeMU(Foo, FooSym), FooRT));
+
+  auto BarRT = JD.createResourceTracker();
+  cantFail(JD.define(MakeMU(Bar, BarSym), BarRT));
+
+  BarRT->transferTo(*FooRT);
+
+  EXPECT_TRUE(ResourceManagerGotTransfer)
+    << "ResourceManager did not receive transfer";
+  EXPECT_TRUE(BarRT->isDefunct())
+    << "BarRT should now be defunct";
+
+  cantFail(ES.lookup(makeJITDylibSearchOrder({&JD}), SymbolLookupSet({Foo, Bar})));
+
+  EXPECT_EQ(SRM.getRecordedResources().size(), 1U)
+    << "Expected exactly one entry (for FooRT's Key)";
+  EXPECT_EQ(SRM.getRecordedResources().count(FooRT->getKeyUnsafe()), 1U)
+    << "Expected an entry for FooRT's ResourceKey";
+  EXPECT_EQ(SRM.getRecordedResources().count(BarRT->getKeyUnsafe()), 0U)
+    << "Expected no entry for BarRT's ResourceKey";
+
+  // We need to explicitly destroy FooRT or its resources will be implicitly
+  // transferred to the default tracker triggering a second call to our
+  // transfer function above (which expects only one call).
+  cantFail(FooRT->remove());
 }
 
 } // namespace

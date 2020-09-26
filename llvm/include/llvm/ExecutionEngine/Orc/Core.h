@@ -72,6 +72,9 @@ public:
   /// tracker, which must target the same JITDylib as this one.
   void transferTo(ResourceTracker &DstRT);
 
+  /// Return true if this tracker has become defunct.
+  bool isDefunct() const { return JDAndFlag.load() & 0x1; }
+
   /// Returns the key associated with this tracker.
   /// This method should not be used except for debug logging: there is no
   /// guarantee that the returned value will remain valid.
@@ -80,8 +83,6 @@ public:
 private:
   ResourceTracker(JITDylibSP JD);
 
-  /// Return true if this tracker has become defunct.
-  bool isDefunct() const { return JDAndFlag.load() & 0x1; }
   void makeDefunct();
 
   std::atomic_uintptr_t JDAndFlag;

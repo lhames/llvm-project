@@ -1714,7 +1714,13 @@ void JITDylib::transferTracker(ResourceTracker &DstRT, ResourceTracker &SrcRT) {
   assert(&DstRT.getJITDylib() == this && "DstRT is not for this JITDylib");
   assert(&SrcRT.getJITDylib() == this && "SrcRT is not for this JITDylib");
 
-  // Update trackers for any active materialization units.
+  // Update trackers for any not-yet materialized units.
+  for (auto &KV : UnmaterializedInfos) {
+    if (KV.second->RT == &SrcRT)
+      KV.second->RT = &DstRT;
+  }
+
+  // Update trackers for any active materialization responsibilities.
   for (auto &KV : MRTrackers) {
     if (KV.second == &SrcRT)
       KV.second = &DstRT;
