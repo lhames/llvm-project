@@ -143,7 +143,7 @@ LLVMErrorRef LLVMOrcJITTargetMachineBuilderDetectHost(
 }
 
 LLVMOrcJITTargetMachineBuilderRef
-LLVMOrcJITTargetMachineBuilderFromTargetMachine(LLVMTargetMachineRef TM) {
+LLVMOrcJITTargetMachineBuilderCreateFromTargetMachine(LLVMTargetMachineRef TM) {
   auto *TemplateTM = unwrap(TM);
 
   auto JTMB =
