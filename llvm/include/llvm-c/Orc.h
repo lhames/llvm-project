@@ -93,6 +93,11 @@ typedef struct LLVMOrcOpaqueLLJITBuilder *LLVMOrcLLJITBuilderRef;
 typedef struct LLVMOrcOpaqueLLJIT *LLVMOrcLLJITRef;
 
 /**
+ * A reference to an orc::ResourceTracker instance.
+ */
+typedef struct LLVMOrcOpaqueResourceTracker *LLVMOrcResourceTrackerRef;
+
+/**
  * Intern a string in the ExecutionSession's SymbolStringPool and return a
  * reference to it. This increments the ref-count of the pool entry, and the
  * returned value should be released once the client is done with it by
@@ -283,6 +288,17 @@ LLVMOrcExecutionSessionRef LLVMOrcLLJITGetExecutionSession(LLVMOrcLLJITRef J);
 LLVMOrcJITDylibRef LLVMOrcLLJITGetMainJITDylib(LLVMOrcLLJITRef J);
 
 /**
+ * Return a reference to a newly created resource tracker associated
+ * with JD. Needs to be released with LLVMOrcResourceTrackerDispose.
+ */
+LLVMOrcResourceTrackerRef LLVMOrcJITDylibCreateResourceTracker(LLVMOrcJITDylibRef JD);
+
+/*
+ * Dispose of a resource tracker reference.
+ */
+void LLVMOrcResourceTrackerDispose(LLVMOrcResourceTrackerRef RT);
+
+/**
  * Return the target triple for this LLJIT instance. This string is owned by
  * the LLJIT instance and should not be freed by the client.
  */
@@ -307,20 +323,37 @@ LLVMOrcLLJITMangleAndIntern(LLVMOrcLLJITRef J, const char *UnmangledName);
  * Add a buffer representing an object file to the given JITDylib in the given
  * LLJIT instance. This operation transfers ownership of the buffer to the
  * LLJIT instance. The buffer should not be disposed of or referenced once this
- * function returns.
+ * function returns. RT may be null, in which case the dylib's main resource
+ * tracker will be used.
  */
 LLVMErrorRef LLVMOrcLLJITAddObjectFile(LLVMOrcLLJITRef J, LLVMOrcJITDylibRef JD,
-                                       LLVMMemoryBufferRef ObjBuffer);
+                                       LLVMMemoryBufferRef ObjBuffer,
+                                       LLVMOrcResourceTrackerRef RT);
 
 /**
  * Add an IR module to the given JITDylib of the given LLJIT instance. This
  * operation transfers ownership of the TSM argument to the LLJIT instance.
- * The TSM argument should not be 3disposed of or referenced once this
- * function returns.
+ * The TSM argument should not be disposed of or referenced once this
+ * function returns. RT may be null, in which case the dylib's main resource
+ * tracker will be used.
  */
 LLVMErrorRef LLVMOrcLLJITAddLLVMIRModule(LLVMOrcLLJITRef J,
                                          LLVMOrcJITDylibRef JD,
-                                         LLVMOrcThreadSafeModuleRef TSM);
+                                         LLVMOrcThreadSafeModuleRef TSM,
+                                         LLVMOrcResourceTrackerRef RT);
+
+/*
+ * Calls remove on all trackers associated with this JITDylib, see
+ * JITDylib::clear().
+ */
+LLVMErrorRef LLVMOrcJITDylibClear(LLVMOrcJITDylibRef JD);
+
+/*
+ * Remove all resources associated with this key. See
+ * ResourceTracker::remove().
+ */
+LLVMErrorRef LLVMOrcResourceTrackerRemove(LLVMOrcResourceTrackerRef RT);
+
 /**
  * Look up the given symbol in the main JITDylib of the given LLJIT instance.
  *

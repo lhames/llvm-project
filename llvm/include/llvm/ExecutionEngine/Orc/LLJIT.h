@@ -103,18 +103,20 @@ public:
   }
 
   /// Adds an IR module to the given JITDylib.
-  Error addIRModule(JITDylib &JD, ThreadSafeModule TSM);
+  Error addIRModule(JITDylib &JD, ThreadSafeModule TSM,
+                    ResourceTrackerSP RT = nullptr);
 
   /// Adds an IR module to the Main JITDylib.
-  Error addIRModule(ThreadSafeModule TSM) {
+  Error addIRModule(ThreadSafeModule TSM, ResourceTrackerSP RT = nullptr) {
     return addIRModule(*Main, std::move(TSM));
   }
 
   /// Adds an object file to the given JITDylib.
-  Error addObjectFile(JITDylib &JD, std::unique_ptr<MemoryBuffer> Obj);
+  Error addObjectFile(JITDylib &JD, std::unique_ptr<MemoryBuffer> Obj,
+                      ResourceTrackerSP RT = nullptr);
 
   /// Adds an object file to the given JITDylib.
-  Error addObjectFile(std::unique_ptr<MemoryBuffer> Obj) {
+  Error addObjectFile(std::unique_ptr<MemoryBuffer> Obj, ResourceTrackerSP RT = nullptr) {
     return addObjectFile(*Main, std::move(Obj));
   }
 

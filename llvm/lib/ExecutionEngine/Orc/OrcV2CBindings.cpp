@@ -55,6 +55,7 @@ DEFINE_SIMPLE_CONVERSION_FUNCTIONS(JITTargetMachineBuilder,
                                    LLVMOrcJITTargetMachineBuilderRef)
 DEFINE_SIMPLE_CONVERSION_FUNCTIONS(LLJITBuilder, LLVMOrcLLJITBuilderRef)
 DEFINE_SIMPLE_CONVERSION_FUNCTIONS(LLJIT, LLVMOrcLLJITRef)
+DEFINE_SIMPLE_CONVERSION_FUNCTIONS(ResourceTrackerSP, LLVMOrcResourceTrackerRef)
 
 DEFINE_SIMPLE_CONVERSION_FUNCTIONS(TargetMachine, LLVMTargetMachineRef)
 
@@ -212,6 +213,20 @@ LLVMOrcJITDylibRef LLVMOrcLLJITGetMainJITDylib(LLVMOrcLLJITRef J) {
   return wrap(&unwrap(J)->getMainJITDylib());
 }
 
+LLVMOrcResourceTrackerRef
+LLVMOrcJITDylibCreateResourceTracker(LLVMOrcJITDylibRef JD)
+{
+  ResourceTrackerSP *RT = new ResourceTrackerSP(unwrap(JD)->createResourceTracker());
+
+  return wrap(RT);
+}
+
+void
+LLVMOrcResourceTrackerDispose(LLVMOrcResourceTrackerRef RT)
+{
+  delete unwrap(RT);
+}
+
 const char *LLVMOrcLLJITGetTripleString(LLVMOrcLLJITRef J) {
   return unwrap(J)->getTargetTriple().str().c_str();
 }
@@ -227,15 +242,29 @@ LLVMOrcLLJITMangleAndIntern(LLVMOrcLLJITRef J, const char *UnmangledName) {
 }
 
 LLVMErrorRef LLVMOrcLLJITAddObjectFile(LLVMOrcLLJITRef J, LLVMOrcJITDylibRef JD,
-                                       LLVMMemoryBufferRef ObjBuffer) {
+                                       LLVMMemoryBufferRef ObjBuffer,
+                                       LLVMOrcResourceTrackerRef RT) {
   return wrap(unwrap(J)->addObjectFile(
-      *unwrap(JD), std::unique_ptr<MemoryBuffer>(unwrap(ObjBuffer))));
+      *unwrap(JD), std::unique_ptr<MemoryBuffer>(unwrap(ObjBuffer)),
+      *unwrap(RT)));
 }
 
 LLVMErrorRef LLVMOrcLLJITAddLLVMIRModule(LLVMOrcLLJITRef J,
                                          LLVMOrcJITDylibRef JD,
-                                         LLVMOrcThreadSafeModuleRef TSM) {
-  return wrap(unwrap(J)->addIRModule(*unwrap(JD), std::move(*unwrap(TSM))));
+                                         LLVMOrcThreadSafeModuleRef TSM,
+                                         LLVMOrcResourceTrackerRef RT) {
+  return wrap(unwrap(J)->addIRModule(*unwrap(JD), std::move(*unwrap(TSM)),
+                                     *unwrap(RT)));
+}
+
+LLVMErrorRef LLVMOrcJITDylibClear(LLVMOrcJITDylibRef JD)
+{
+  return wrap(unwrap(JD)->clear());
+}
+
+LLVMErrorRef LLVMOrcResourceTrackerRemove(LLVMOrcResourceTrackerRef RT)
+{
+  return wrap((*unwrap(RT))->remove());
 }
 
 LLVMErrorRef LLVMOrcLLJITLookup(LLVMOrcLLJITRef J,
