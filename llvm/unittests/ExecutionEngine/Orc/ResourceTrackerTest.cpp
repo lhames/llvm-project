@@ -163,7 +163,8 @@ TEST_F(ResourceTrackerStandardTest, BasicDefineAndRemoveAllAfterMaterializing) {
   auto MU = std::make_unique<SimpleMaterializationUnit>(
       SymbolFlagsMap({{Foo, FooSym.getFlags()}}),
       [&](std::unique_ptr<MaterializationResponsibility> R) {
-        cantFail(R->withResourceKeyDo([&](ResourceKey K) { SRM.recordResource(K); }));
+        cantFail(R->withResourceKeyDo(
+            [&](ResourceKey K) { SRM.recordResource(K); }));
         cantFail(R->notifyResolved({{Foo, FooSym}}));
         cantFail(R->notifyEmitted());
       });
@@ -222,13 +223,13 @@ TEST_F(ResourceTrackerStandardTest, BasicDefineAndRemoveAllWhileMaterializing) {
   EXPECT_TRUE(ResourceManagerGotRemove)
       << "ResourceManager did not receive handleRemoveResources";
 
-  EXPECT_THAT_ERROR(
-    MR->withResourceKeyDo([](ResourceKey K) {
-      ADD_FAILURE() << "Should not reach withResourceKeyDo body for removed key";
-    }),
-    Failed<ResourceTrackerDefunct>())
-    << "withResourceKeyDo on MR with removed tracker should have failed";
-  EXPECT_THAT_ERROR(MR->notifyResolved({{Foo, FooSym}}), Failed<ResourceTrackerDefunct>())
+  EXPECT_THAT_ERROR(MR->withResourceKeyDo([](ResourceKey K) {
+    ADD_FAILURE() << "Should not reach withResourceKeyDo body for removed key";
+  }),
+                    Failed<ResourceTrackerDefunct>())
+      << "withResourceKeyDo on MR with removed tracker should have failed";
+  EXPECT_THAT_ERROR(MR->notifyResolved({{Foo, FooSym}}),
+                    Failed<ResourceTrackerDefunct>())
       << "notifyResolved on MR with removed tracker should have failed";
 
   MR->failMaterialization();
@@ -242,7 +243,7 @@ TEST_F(ResourceTrackerStandardTest, JITDylibClear) {
       SymbolFlagsMap({{Foo, FooSym.getFlags()}}),
       [&](std::unique_ptr<MaterializationResponsibility> R) {
         cantFail(R->withResourceKeyDo(
-                                      [&](ResourceKey K) { ++SRM.getRecordedResources()[K]; }));
+            [&](ResourceKey K) { ++SRM.getRecordedResources()[K]; }));
         cantFail(R->notifyResolved({{Foo, FooSym}}));
         cantFail(R->notifyEmitted());
       })));
@@ -252,7 +253,7 @@ TEST_F(ResourceTrackerStandardTest, JITDylibClear) {
       SymbolFlagsMap({{Bar, BarSym.getFlags()}}),
       [&](std::unique_ptr<MaterializationResponsibility> R) {
         cantFail(R->withResourceKeyDo(
-                                      [&](ResourceKey K) { ++SRM.getRecordedResources()[K]; }));
+            [&](ResourceKey K) { ++SRM.getRecordedResources()[K]; }));
         cantFail(R->notifyResolved({{Bar, BarSym}}));
         cantFail(R->notifyEmitted());
       })));
@@ -282,29 +283,28 @@ TEST_F(ResourceTrackerStandardTest,
        BasicDefineAndExplicitTransferBeforeMaterializing) {
 
   bool ResourceManagerGotTransfer = false;
-  SimpleResourceManager<> SRM(ES, [&](ResourceKey K) -> Error {
-      SRM.removeResource(K);
-      return Error::success();
-    },
-    [&](ResourceKey DstKey, ResourceKey SrcKey) {
-      ResourceManagerGotTransfer = true;
-      auto &RR = SRM.getRecordedResources();
-      EXPECT_EQ(RR.size(), 0U)
-        << "Expected no resources recorded yet";
+  SimpleResourceManager<> SRM(
+      ES,
+      [&](ResourceKey K) -> Error {
+        SRM.removeResource(K);
+        return Error::success();
+      },
+      [&](ResourceKey DstKey, ResourceKey SrcKey) {
+        ResourceManagerGotTransfer = true;
+        auto &RR = SRM.getRecordedResources();
+        EXPECT_EQ(RR.size(), 0U) << "Expected no resources recorded yet";
       });
 
-  auto MakeMU =
-    [&](SymbolStringPtr Name, JITEvaluatedSymbol Sym) {
-      return std::make_unique<SimpleMaterializationUnit>(
-          SymbolFlagsMap({{Name, Sym.getFlags()}}),
-          [=, &SRM](std::unique_ptr<MaterializationResponsibility> R) {
-            cantFail(R->withResourceKeyDo([&](ResourceKey K) {
-              SRM.recordResource(K);
-            }));
-            cantFail(R->notifyResolved({{Name, Sym}}));
-            cantFail(R->notifyEmitted());
-          });
-    };
+  auto MakeMU = [&](SymbolStringPtr Name, JITEvaluatedSymbol Sym) {
+    return std::make_unique<SimpleMaterializationUnit>(
+        SymbolFlagsMap({{Name, Sym.getFlags()}}),
+        [=, &SRM](std::unique_ptr<MaterializationResponsibility> R) {
+          cantFail(R->withResourceKeyDo(
+              [&](ResourceKey K) { SRM.recordResource(K); }));
+          cantFail(R->notifyResolved({{Name, Sym}}));
+          cantFail(R->notifyEmitted());
+        });
+  };
 
   auto FooRT = JD.createResourceTracker();
   cantFail(JD.define(MakeMU(Foo, FooSym), FooRT));
@@ -315,18 +315,18 @@ TEST_F(ResourceTrackerStandardTest,
   BarRT->transferTo(*FooRT);
 
   EXPECT_TRUE(ResourceManagerGotTransfer)
-    << "ResourceManager did not receive transfer";
-  EXPECT_TRUE(BarRT->isDefunct())
-    << "BarRT should now be defunct";
+      << "ResourceManager did not receive transfer";
+  EXPECT_TRUE(BarRT->isDefunct()) << "BarRT should now be defunct";
 
-  cantFail(ES.lookup(makeJITDylibSearchOrder({&JD}), SymbolLookupSet({Foo, Bar})));
+  cantFail(
+      ES.lookup(makeJITDylibSearchOrder({&JD}), SymbolLookupSet({Foo, Bar})));
 
   EXPECT_EQ(SRM.getRecordedResources().size(), 1U)
-    << "Expected exactly one entry (for FooRT's Key)";
+      << "Expected exactly one entry (for FooRT's Key)";
   EXPECT_EQ(SRM.getRecordedResources().count(FooRT->getKeyUnsafe()), 1U)
-    << "Expected an entry for FooRT's ResourceKey";
+      << "Expected an entry for FooRT's ResourceKey";
   EXPECT_EQ(SRM.getRecordedResources().count(BarRT->getKeyUnsafe()), 0U)
-    << "Expected no entry for BarRT's ResourceKey";
+      << "Expected no entry for BarRT's ResourceKey";
 
   // We need to explicitly destroy FooRT or its resources will be implicitly
   // transferred to the default tracker triggering a second call to our
@@ -338,27 +338,27 @@ TEST_F(ResourceTrackerStandardTest,
        BasicDefineAndExplicitTransferAfterMaterializing) {
 
   bool ResourceManagerGotTransfer = false;
-  SimpleResourceManager<> SRM(ES, [&](ResourceKey K) -> Error {
-      SRM.removeResource(K);
-      return Error::success();
-    },
-    [&](ResourceKey DstKey, ResourceKey SrcKey) {
-      ResourceManagerGotTransfer = true;
-      SRM.transferResources(DstKey, SrcKey);
+  SimpleResourceManager<> SRM(
+      ES,
+      [&](ResourceKey K) -> Error {
+        SRM.removeResource(K);
+        return Error::success();
+      },
+      [&](ResourceKey DstKey, ResourceKey SrcKey) {
+        ResourceManagerGotTransfer = true;
+        SRM.transferResources(DstKey, SrcKey);
       });
 
-  auto MakeMU =
-    [&](SymbolStringPtr Name, JITEvaluatedSymbol Sym) {
-      return std::make_unique<SimpleMaterializationUnit>(
-          SymbolFlagsMap({{Name, Sym.getFlags()}}),
-          [=, &SRM](std::unique_ptr<MaterializationResponsibility> R) {
-            cantFail(R->withResourceKeyDo([&](ResourceKey K) {
-              SRM.recordResource(K, 1);
-            }));
-            cantFail(R->notifyResolved({{Name, Sym}}));
-            cantFail(R->notifyEmitted());
-          });
-    };
+  auto MakeMU = [&](SymbolStringPtr Name, JITEvaluatedSymbol Sym) {
+    return std::make_unique<SimpleMaterializationUnit>(
+        SymbolFlagsMap({{Name, Sym.getFlags()}}),
+        [=, &SRM](std::unique_ptr<MaterializationResponsibility> R) {
+          cantFail(R->withResourceKeyDo(
+              [&](ResourceKey K) { SRM.recordResource(K, 1); }));
+          cantFail(R->notifyResolved({{Name, Sym}}));
+          cantFail(R->notifyEmitted());
+        });
+  };
 
   auto FooRT = JD.createResourceTracker();
   cantFail(JD.define(MakeMU(Foo, FooSym), FooRT));
@@ -367,48 +367,51 @@ TEST_F(ResourceTrackerStandardTest,
   cantFail(JD.define(MakeMU(Bar, BarSym), BarRT));
 
   EXPECT_EQ(SRM.getRecordedResources().size(), 0U)
-    << "Expected no recorded resources yet";
+      << "Expected no recorded resources yet";
 
-  cantFail(ES.lookup(makeJITDylibSearchOrder({&JD}), SymbolLookupSet({Foo, Bar})));
+  cantFail(
+      ES.lookup(makeJITDylibSearchOrder({&JD}), SymbolLookupSet({Foo, Bar})));
 
   EXPECT_EQ(SRM.getRecordedResources().size(), 2U)
-    << "Expected recorded resources for both Foo and Bar";
+      << "Expected recorded resources for both Foo and Bar";
 
   BarRT->transferTo(*FooRT);
 
   EXPECT_TRUE(ResourceManagerGotTransfer)
-    << "ResourceManager did not receive transfer";
-  EXPECT_TRUE(BarRT->isDefunct())
-    << "BarRT should now be defunct";
+      << "ResourceManager did not receive transfer";
+  EXPECT_TRUE(BarRT->isDefunct()) << "BarRT should now be defunct";
 
   EXPECT_EQ(SRM.getRecordedResources().size(), 1U)
-    << "Expected recorded resources for Foo only";
+      << "Expected recorded resources for Foo only";
   EXPECT_EQ(SRM.getRecordedResources().count(FooRT->getKeyUnsafe()), 1U)
-    << "Expected recorded resources for Foo";
+      << "Expected recorded resources for Foo";
   EXPECT_EQ(SRM.getRecordedResources()[FooRT->getKeyUnsafe()], 2U)
-    << "Expected resources value for for Foo to be '2'";
+      << "Expected resources value for for Foo to be '2'";
 }
 
 TEST_F(ResourceTrackerStandardTest,
        BasicDefineAndExplicitTransferWhileMaterializing) {
 
   bool ResourceManagerGotTransfer = false;
-  SimpleResourceManager<> SRM(ES, [&](ResourceKey K) -> Error {
-      SRM.removeResource(K);
-      return Error::success();
-    },
-    [&](ResourceKey DstKey, ResourceKey SrcKey) {
-      ResourceManagerGotTransfer = true;
-      SRM.transferResources(DstKey, SrcKey);
+  SimpleResourceManager<> SRM(
+      ES,
+      [&](ResourceKey K) -> Error {
+        SRM.removeResource(K);
+        return Error::success();
+      },
+      [&](ResourceKey DstKey, ResourceKey SrcKey) {
+        ResourceManagerGotTransfer = true;
+        SRM.transferResources(DstKey, SrcKey);
       });
 
   auto FooRT = JD.createResourceTracker();
   std::unique_ptr<MaterializationResponsibility> FooMR;
   cantFail(JD.define(std::make_unique<SimpleMaterializationUnit>(
-      SymbolFlagsMap({{Foo, FooSym.getFlags()}}),
-      [&](std::unique_ptr<MaterializationResponsibility> R) {
-        FooMR = std::move(R);
-      }), FooRT));
+                         SymbolFlagsMap({{Foo, FooSym.getFlags()}}),
+                         [&](std::unique_ptr<MaterializationResponsibility> R) {
+                           FooMR = std::move(R);
+                         }),
+                     FooRT));
 
   auto BarRT = JD.createResourceTracker();
 
@@ -418,36 +421,34 @@ TEST_F(ResourceTrackerStandardTest,
       [](Expected<SymbolMap> Result) { cantFail(Result.takeError()); },
       NoDependenciesToRegister);
 
-  cantFail(
-    FooMR->withResourceKeyDo([&](ResourceKey K) {
-      EXPECT_EQ(FooRT->getKeyUnsafe(), K)
+  cantFail(FooMR->withResourceKeyDo([&](ResourceKey K) {
+    EXPECT_EQ(FooRT->getKeyUnsafe(), K)
         << "Expected FooRT's ResourceKey for Foo here";
-      SRM.recordResource(K, 1);
-    }));
+    SRM.recordResource(K, 1);
+  }));
 
   EXPECT_EQ(SRM.getRecordedResources().size(), 1U)
-    << "Expected one recorded resource here";
+      << "Expected one recorded resource here";
   EXPECT_EQ(SRM.getRecordedResources()[FooRT->getKeyUnsafe()], 1U)
-    << "Expected Resource value for FooRT to be '1' here";
+      << "Expected Resource value for FooRT to be '1' here";
 
   FooRT->transferTo(*BarRT);
 
   EXPECT_TRUE(ResourceManagerGotTransfer)
-    << "Expected resource manager to receive handleTransferResources call";
+      << "Expected resource manager to receive handleTransferResources call";
 
-  cantFail(
-    FooMR->withResourceKeyDo([&](ResourceKey K) {
-      EXPECT_EQ(BarRT->getKeyUnsafe(), K)
+  cantFail(FooMR->withResourceKeyDo([&](ResourceKey K) {
+    EXPECT_EQ(BarRT->getKeyUnsafe(), K)
         << "Expected BarRT's ResourceKey for Foo here";
-      SRM.recordResource(K, 1);
-    }));
+    SRM.recordResource(K, 1);
+  }));
 
   EXPECT_EQ(SRM.getRecordedResources().size(), 1U)
-    << "Expected one recorded resource here";
+      << "Expected one recorded resource here";
   EXPECT_EQ(SRM.getRecordedResources().count(BarRT->getKeyUnsafe()), 1U)
-    << "Expected RecordedResources to contain an entry for BarRT";
+      << "Expected RecordedResources to contain an entry for BarRT";
   EXPECT_EQ(SRM.getRecordedResources()[BarRT->getKeyUnsafe()], 2U)
-    << "Expected Resource value for BarRT to be '2' here";
+      << "Expected Resource value for BarRT to be '2' here";
 
   cantFail(FooMR->notifyResolved({{Foo, FooSym}}));
   cantFail(FooMR->notifyEmitted());
