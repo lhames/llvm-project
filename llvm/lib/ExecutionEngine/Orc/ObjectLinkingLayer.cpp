@@ -487,10 +487,8 @@ Error ObjectLinkingLayer::notifyEmitted(MaterializationResponsibility &MR,
   if (Err)
     return Err;
 
-  MR.withResourceKeyDo(
+  return MR.withResourceKeyDo(
       [&](ResourceKey K) { Allocs[K].push_back(std::move(Alloc)); });
-
-  return Error::success();
 }
 
 Error ObjectLinkingLayer::handleRemoveResources(ResourceKey K) {
@@ -568,8 +566,9 @@ Error EHFrameRegistrationPlugin::notifyEmitted(
     InProcessLinks.erase(EHFrameRangeItr);
   }
 
-  MR.withResourceKeyDo(
-      [&](ResourceKey K) { EHFrameRanges[K].push_back(EmittedRange); });
+  if (auto Err = MR.withResourceKeyDo(
+      [&](ResourceKey K) { EHFrameRanges[K].push_back(EmittedRange); }))
+    return Err;
 
   return Registrar->registerEHFrames(EmittedRange.Addr, EmittedRange.Size);
 }
