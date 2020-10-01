@@ -35,7 +35,7 @@
 namespace llvm {
 namespace orc {
 
-class RTDyldObjectLinkingLayer : public ObjectLayer {
+class RTDyldObjectLinkingLayer : public ObjectLayer, private ResourceManager {
 public:
   /// Functor for receiving object-loaded notifications.
   using NotifyLoadedFunction = std::function<void(
@@ -122,16 +122,23 @@ public:
   void unregisterJITEventListener(JITEventListener &L);
 
 private:
+  using MemoryManagerUP = std::unique_ptr<RuntimeDyld::MemoryManager>;
+
   Error onObjLoad(MaterializationResponsibility &R,
                   const object::ObjectFile &Obj,
-                  RuntimeDyld::MemoryManager *MemMgr,
-                  std::unique_ptr<RuntimeDyld::LoadedObjectInfo> LoadedObjInfo,
+                  RuntimeDyld::MemoryManager &MemMgr,
+                  RuntimeDyld::LoadedObjectInfo &LoadedObjInfo,
                   std::map<StringRef, JITEvaluatedSymbol> Resolved,
                   std::set<StringRef> &InternalSymbols);
 
   void onObjEmit(MaterializationResponsibility &R,
                  object::OwningBinary<object::ObjectFile> O,
-                 RuntimeDyld::MemoryManager *MemMgr, Error Err);
+                 std::unique_ptr<RuntimeDyld::MemoryManager> MemMgr,
+                 std::unique_ptr<RuntimeDyld::LoadedObjectInfo> LoadedObjInfo,
+                 Error Err);
+
+  Error handleRemoveResources(ResourceKey K) override;
+  void handleTransferResources(ResourceKey DstKey, ResourceKey SrcKey) override;
 
   mutable std::mutex RTDyldLayerMutex;
   GetMemoryManagerFunction GetMemoryManager;
@@ -140,11 +147,8 @@ private:
   bool ProcessAllSections = false;
   bool OverrideObjectFlags = false;
   bool AutoClaimObjectSymbols = false;
-  std::vector<std::unique_ptr<RuntimeDyld::MemoryManager>> MemMgrs;
+  DenseMap<ResourceKey, std::vector<MemoryManagerUP>> MemMgrs;
   std::vector<JITEventListener *> EventListeners;
-  DenseMap<RuntimeDyld::MemoryManager *,
-           std::unique_ptr<RuntimeDyld::LoadedObjectInfo>>
-      LoadedObjInfos;
 };
 
 } // end namespace orc

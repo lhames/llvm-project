@@ -524,7 +524,10 @@ void ObjectLinkingLayer::handleTransferResources(ResourceKey DstKey,
     DstAllocs.reserve(DstAllocs.size() + SrcAllocs.size());
     for (auto &Alloc : SrcAllocs)
       DstAllocs.push_back(std::move(Alloc));
-    Allocs.erase(I);
+
+    // Erase SrcKey entry using value rather than iterator I: I may have been
+    // invalidated when we looked up DstKey.
+    Allocs.erase(SrcKey);
   }
 
   for (auto &P : Plugins)
