@@ -1756,13 +1756,14 @@ void JITDylib::transferTracker(ResourceTracker &DstRT, ResourceTracker &SrcRT) {
     return;
   }
 
+  auto &DstTrackedSymbols = TrackerSymbols[&DstRT];
+
   // Finally if neither SrtRT or DstRT are the default tracker then
   // just append DstRT's tracked symbols to SrtRT's.
   auto SI = TrackerSymbols.find(&SrcRT);
   if (SI == TrackerSymbols.end())
     return;
 
-  auto &DstTrackedSymbols = TrackerSymbols[&DstRT];
   DstTrackedSymbols.reserve(DstTrackedSymbols.size() + SI->second.size());
   for (auto &Sym : SI->second)
     DstTrackedSymbols.push_back(std::move(Sym));

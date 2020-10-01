@@ -491,7 +491,7 @@ public:
 
   /// Returns the ResourceTracker for this instance.
   template <typename Func>
-  auto withResourceKeyDo(Func &&F) const -> decltype(F(ResourceKey()));
+  Error withResourceKeyDo(Func &&F) const;
 
   /// Returns the target JITDylib that these symbols are being materialized
   ///        into.
@@ -1419,12 +1419,14 @@ inline ExecutionSession &MaterializationResponsibility::getExecutionSession() {
 }
 
 template <typename Func>
-auto MaterializationResponsibility::withResourceKeyDo(Func &&F) const
-    -> decltype(F(ResourceKey())) {
-  return JD->getExecutionSession().runSessionLocked([&] {
+Error MaterializationResponsibility::withResourceKeyDo(Func &&F) const {
+  return JD->getExecutionSession().runSessionLocked([&]() -> Error {
     auto I = JD->MRTrackers.find(this);
     assert(I != JD->MRTrackers.end() && "No tracker for this MR");
-    return F(I->second->getKeyUnsafe());
+    if (I->second->isDefunct())
+      return make_error<ResourceTrackerDefunct>(I->second);
+    F(I->second->getKeyUnsafe());
+    return Error::success();
   });
 }
 
