@@ -11,6 +11,7 @@
 
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ExecutionEngine/Orc/Shared/Serialization.h"
+#include "llvm/ExecutionEngine/Orc/Shared/WrapperFunctionUtils.h"
 #include "llvm/Support/Endian.h"
 #include "llvm/Support/Error.h"
 #include <cstdint>
@@ -173,6 +174,59 @@ public:
       return Err;
     S.resize(Count);
     return C.readBytes(&S[0], Count);
+  }
+};
+
+template <typename ChannelT>
+class SerializationTraits<
+    ChannelT, WrapperFunctionResult, WrapperFunctionResult,
+    std::enable_if_t<std::is_base_of<RawByteChannel, ChannelT>::value>> {
+public:
+  static Error serialize(ChannelT &C, const WrapperFunctionResult &E) {
+    if (auto Err = serializeSeq(C, static_cast<uint64_t>(E.size())))
+      return Err;
+    if (E.size() == 0)
+      return Error::success();
+    return C.appendBytes(E.data(), E.size());
+  }
+
+  static Error deserialize(ChannelT &C, WrapperFunctionResult &E) {
+    LLVMOrcSharedCWrapperFunctionResult R;
+
+    uint64_t Size;
+    R.Size = 0;
+    R.Data.ValuePtr = nullptr;
+    R.Destroy = nullptr;
+
+    if (auto Err = deserializeSeq(C, Size))
+      return Err;
+    R.Size = Size;
+
+    if (R.Size == 0) {
+      E = WrapperFunctionResult(R);
+      return Error::success();
+    }
+
+    char *Data;
+    if (R.Size > sizeof(R.Data)) {
+      Data = new char[R.Size];
+      R.Data.ValuePtr = Data;
+      R.Destroy = WrapperFunctionResult::destroyWithArrayDelete;
+    } else
+      Data = &R.Data.Value[0];
+
+    // Assign to E -- this ensures cleanup in the case that the call below
+    // fails.
+    E = WrapperFunctionResult(R);
+
+    if (auto Err = C.readBytes(Data, R.Size))
+      return Err;
+
+    // Re-assign to E -- this ensures that data is copied in the small-data
+    // case.
+    E = WrapperFunctionResult(R);
+
+    return Error::success();
   }
 };
 

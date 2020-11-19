@@ -17,6 +17,10 @@
 #include "llvm/ExecutionEngine/Orc/Core.h"
 #include "llvm/ExecutionEngine/Orc/ExecutionUtils.h"
 #include "llvm/ExecutionEngine/Orc/ObjectLinkingLayer.h"
+#include "llvm/ExecutionEngine/Orc/Shared/MachOPlatformTypes.h"
+#include "llvm/ExecutionEngine/Orc/Shared/WrapperFunctionUtils.h"
+#include "llvm/ExecutionEngine/Orc/TargetProcessControl.h"
+#include "llvm/ExecutionEngine/Orc/WrapperFunctionManager.h"
 
 #include <future>
 #include <thread>
@@ -25,94 +29,132 @@
 namespace llvm {
 namespace orc {
 
-/// Enable registration of JIT'd ObjC classes and selectors.
-Error enableObjCRegistration(const char *PathToLibObjC);
-bool objCRegistrationEnabled();
-
-class MachOJITDylibInitializers {
-public:
-  struct SectionExtent {
-    SectionExtent() = default;
-    SectionExtent(JITTargetAddress Address, uint64_t NumPtrs)
-        : Address(Address), NumPtrs(NumPtrs) {}
-    JITTargetAddress Address = 0;
-    uint64_t NumPtrs = 0;
-  };
-
-  using RawPointerSectionList = std::vector<SectionExtent>;
-
-  void setObjCImageInfoAddr(JITTargetAddress ObjCImageInfoAddr) {
-    this->ObjCImageInfoAddr = ObjCImageInfoAddr;
-  }
-
-  void addModInitsSection(SectionExtent ModInit) {
-    ModInitSections.push_back(std::move(ModInit));
-  }
-
-  const RawPointerSectionList &getModInitsSections() const {
-    return ModInitSections;
-  }
-
-  void addObjCSelRefsSection(SectionExtent ObjCSelRefs) {
-    ObjCSelRefsSections.push_back(std::move(ObjCSelRefs));
-  }
-
-  const RawPointerSectionList &getObjCSelRefsSections() const {
-    return ObjCSelRefsSections;
-  }
-
-  void addObjCClassListSection(SectionExtent ObjCClassList) {
-    ObjCClassListSections.push_back(std::move(ObjCClassList));
-  }
-
-  const RawPointerSectionList &getObjCClassListSections() const {
-    return ObjCClassListSections;
-  }
-
-  void runModInits() const;
-  void registerObjCSelectors() const;
-  Error registerObjCClasses() const;
-
-private:
-
-  JITTargetAddress ObjCImageInfoAddr;
-  RawPointerSectionList ModInitSections;
-  RawPointerSectionList ObjCSelRefsSections;
-  RawPointerSectionList ObjCClassListSections;
-};
-
-class MachOJITDylibDeinitializers {};
-
 /// Mediates between MachO initialization and ExecutionSession state.
 class MachOPlatform : public Platform {
 public:
-  using InitializerSequence =
-      std::vector<std::pair<JITDylib *, MachOJITDylibInitializers>>;
+  using RuntimeSupportWrapperPlatformMethod =
+      shared::WrapperFunctionResult (MachOPlatform::*)(ArrayRef<char>);
 
-  using DeinitializerSequence =
-      std::vector<std::pair<JITDylib *, MachOJITDylibDeinitializers>>;
+  using RuntimeSupportWrapperFunctionsMap =
+      DenseMap<SymbolStringPtr, WrapperFunctionManager::WrapperFunction>;
 
-  MachOPlatform(ExecutionSession &ES, ObjectLinkingLayer &ObjLinkingLayer,
-                std::unique_ptr<MemoryBuffer> StandardSymbolsObject);
+  using InitializerSequence = shared::MachOPlatformInitializerSequence;
+  using DeinitializerSequence = shared::MachOPlatformDeinitializerSequence;
+
+  /// Try to create a MachOPlatform instance, adding the ORC runtime to the
+  /// given JITDylib.
+  ///
+  /// The ORC runtime requires access to a number of symbols in libc++, and
+  /// requires access to symbols in libobjc, and libswiftCore to support
+  /// Objective-C and Swift code. It is up to the caller to ensure that the
+  /// requried symbols can be referenced by code added to PlatformJD. The
+  /// standard way to achieve this is to first attach dynamic library search
+  /// generators for either the given process, or for the specific required
+  /// libraries, to PlatformJD, then to create the platform instance:
+  ///
+  /// \code{.cpp}
+  ///   auto &PlatformJD = ES.createBareJITDylib("stdlib");
+  ///   PlatformJD.addGenerator(
+  ///     ExitOnErr(TPCDynamicLibrarySearchGenerator
+  ///                 ::GetForTargetProcess(TPC)));
+  ///   ES.setPlatform(
+  ///     ExitOnErr(MachOPlatform::Create(ES, ObjLayer, TPC, PlatformJD,
+  ///                                     "/path/to/orc/runtime")));
+  /// \endcode
+  ///
+  /// Alternatively, these symbols could be added to another JITDylib that
+  /// PlatformJD links against.
+  ///
+  /// Clients are also responsible for ensuring that any JIT'd code that
+  /// depends on runtime functions (including any code using TLV or static
+  /// destructors) can reference the runtime symbols. This is usually achieved
+  /// by linking any JITDylibs containing regular code against
+  /// PlatformJD.
+  ///
+  /// By default, MachOPlatform will add the set of aliases returned by the
+  /// standardPlatformAliases function. This includes both required aliases
+  /// (e.g. __cxa_atexit -> __orc_rt_macho_cxa_atexit for static destructor
+  /// support), and optional aliases that provide JIT versions of common
+  /// functions (e.g. dlopen -> __orc_rt_macho_jit_dlopen). Clients can
+  /// override these defaults by passing a non-None value for the
+  /// RuntimeAliases function, in which case the client is responsible for
+  /// setting up all aliases (including the required ones).
+  static Expected<std::unique_ptr<MachOPlatform>>
+  Create(ExecutionSession &ES, ObjectLinkingLayer &ObjLinkingLayer,
+         TargetProcessControl &TPC, JITDylib &PlatformJD,
+         const char *OrcRuntimePath,
+         Optional<SymbolAliasMap> RuntimeAliases = None);
 
   ExecutionSession &getExecutionSession() const { return ES; }
+
+  ObjectLinkingLayer &getObjectLinkingLayer() const { return ObjLinkingLayer; }
+
+  const Triple &getTargetTriple() const { return TPC.getTargetTriple(); }
+
+  Error shutdown() override;
 
   Error setupJITDylib(JITDylib &JD) override;
   Error notifyAdding(ResourceTracker &RT,
                      const MaterializationUnit &MU) override;
-  Error notifyRemoving(ResourceTracker &RT) override;
 
+  /// Return the initializer sequence required to initialize the given JITDylib
+  /// (and any uninitialized dependencies).
   Expected<InitializerSequence> getInitializerSequence(JITDylib &JD);
 
+  /// Return the deinitializer sequence required to deinitialize the given
+  /// JITDylib.
   Expected<DeinitializerSequence> getDeinitializerSequence(JITDylib &JD);
 
+  /// Return the result of a dlsym style lookup based on the given dso_handle
+  /// and symbol name.
+  Expected<JITTargetAddress> dlsymLookup(JITTargetAddress DSOHandle,
+                                         StringRef Symbol);
+
+  /// Wrapper for jit_dlopen suitable for use with runWrapper dispatch.
+  shared::WrapperFunctionResult
+  rt_getInitializerSequenceWrapper(ArrayRef<char> ArgBuffer);
+
+  /// Wrapper for jit_dlsym suitable for use with runWrapper dispatch.
+  shared::WrapperFunctionResult rt_dlsymLookupWrapper(ArrayRef<char> ArgBuffer);
+
+  /// Returns a WrapperFunctionManager::WrapperFunction wrapping the given
+  /// method (invoking it on 'this').
+  WrapperFunctionManager::WrapperFunction
+  runtimeSupportMethod(RuntimeSupportWrapperPlatformMethod M) {
+    return
+        [this, M](ArrayRef<char> ArgBuffer) { return (this->*M)(ArgBuffer); };
+  }
+
+  /// Returns an AliasMap containing the default aliases for the MachOPlatform.
+  /// This can be modified by clients when constructing the platform to add
+  /// or remove aliases.
+  static SymbolAliasMap standardPlatformAliases(ExecutionSession &ES);
+
+  /// Returns the array of required CXX aliases.
+  static ArrayRef<std::pair<const char *, const char *>> requiredCXXAliases();
+
+  /// Returns the array of standard runtime utility aliases for MachO.
+  static ArrayRef<std::pair<const char *, const char *>>
+  standardRuntimeUtilityAliases();
+
 private:
-  // This ObjectLinkingLayer plugin scans JITLink graphs for __mod_init_func,
-  // __objc_classlist and __sel_ref sections and records their extents so that
-  // they can be run in the target process.
-  class InitScraperPlugin : public ObjectLinkingLayer::Plugin {
+  // The MachOPlatformPlugin scans and manipulates LinkGraphs to enable the
+  // following MachO features:
+  //
+  //   - Identification and reporting to MachOPlatform of of __mod_init_func,
+  //     __objc_classlist, and __sel_ref sections. This is used by MachOPlatform
+  //     to enable execution of initializers and registration with the ObjC
+  //     runtime.
+  //
+  //   - Recording of __thread_vars sections. This is used by MachOPlatform to
+  //     facilitate thread local variable initialization.
+  //
+  //   - Lowering of PCRel32TLV edges. This introduces GOT style entries
+  //     pointing to TLV descriptors.
+  //
+  class MachOPlatformPlugin : public ObjectLinkingLayer::Plugin {
   public:
-    InitScraperPlugin(MachOPlatform &MP) : MP(MP) {}
+    MachOPlatformPlugin(MachOPlatform &MP) : MP(MP) {}
 
     void modifyPassConfig(MaterializationResponsibility &MR,
                           jitlink::LinkGraph &G,
@@ -138,34 +180,76 @@ private:
     using InitSymbolDepMap =
         DenseMap<MaterializationResponsibility *, JITLinkSymbolVector>;
 
-    void preserveInitSectionIfPresent(JITLinkSymbolVector &Syms,
-                                      jitlink::LinkGraph &G,
-                                      StringRef SectionName);
+    void addInitializerSupportPasses(MaterializationResponsibility &MR,
+                                     jitlink::PassConfiguration &Config);
+
+    void addMachOHeaderSupportPasses(MaterializationResponsibility &MR,
+                                     jitlink::PassConfiguration &Config);
+
+    void addEHAndTLVSupportPasses(MaterializationResponsibility &MR,
+                                  jitlink::PassConfiguration &Config);
+
+    Error preserveInitSections(jitlink::LinkGraph &G,
+                               MaterializationResponsibility &MR);
 
     Error processObjCImageInfo(jitlink::LinkGraph &G,
                                MaterializationResponsibility &MR);
 
-    std::mutex InitScraperMutex;
+    Error registerInitSections(jitlink::LinkGraph &G, JITDylib &JD);
+
+    Error fixTLVSectionsAndEdges(jitlink::LinkGraph &G, JITDylib &JD);
+
+    std::mutex PluginMutex;
     MachOPlatform &MP;
     DenseMap<JITDylib *, std::pair<uint32_t, uint32_t>> ObjCImageInfos;
     InitSymbolDepMap InitSymbolDeps;
   };
 
-  void registerInitInfo(JITDylib &JD, JITTargetAddress ObjCImageInfoAddr,
-                        MachOJITDylibInitializers::SectionExtent ModInits,
-                        MachOJITDylibInitializers::SectionExtent ObjCSelRefs,
-                        MachOJITDylibInitializers::SectionExtent ObjCClassList);
+  static bool supportedTarget(const Triple &TT);
+
+  MachOPlatform(ExecutionSession &ES, ObjectLinkingLayer &ObjLinkingLayer,
+                TargetProcessControl &TPC, JITDylib &PlatformJD,
+                std::unique_ptr<DefinitionGenerator> OrcRuntimeGenerator,
+                Error &Err);
+
+  // Connects JIT-side function tags in the runtime to their implementation
+  // functions in MachOPlatform.
+  Error associateRuntimeTagsWithJITSideFunctions(JITDylib &PlatformJD);
+
+  // Records the addresses of runtime symbols used by the platform.
+  Error bootstrapMachORuntime(JITDylib &PlatformJD);
+
+  Error registerInitInfo(JITDylib &JD, JITTargetAddress ObjCImageInfoAddr,
+                         ArrayRef<jitlink::Section *> InitSections);
+
+  Error
+  registerPerObjectSections(const shared::PerObjectRegisterableSections &PORS);
+
+  Expected<uint64_t> createPThreadKey();
 
   ExecutionSession &ES;
   ObjectLinkingLayer &ObjLinkingLayer;
-  std::unique_ptr<MemoryBuffer> StandardSymbolsObject;
+  TargetProcessControl &TPC;
+
+  SymbolStringPtr MachOHeaderStartSymbol;
+  std::atomic<bool> RuntimeBootstrapped{false};
+
+  JITTargetAddress orc_rt_macho_platform_bootstrap = 0;
+  JITTargetAddress orc_rt_macho_platform_shutdown = 0;
+  JITTargetAddress orc_rt_macho_register_object_sections = 0;
+  JITTargetAddress orc_rt_macho_create_pthread_key = 0;
 
   DenseMap<JITDylib *, SymbolLookupSet> RegisteredInitSymbols;
 
-  // InitSeqs gets its own mutex to avoid locking the whole session when
-  // aggregating data from the jitlink.
-  std::mutex InitSeqsMutex;
-  DenseMap<JITDylib *, MachOJITDylibInitializers> InitSeqs;
+  // The Platform gets its own mutex to avoid locking the whole session when
+  // aggregating data from the MachOPlatformPlugin.
+  // FIXME: Should this mutex be broken up further?
+  std::mutex PlatformMutex;
+  DenseMap<JITDylib *, shared::MachOJITDylibInitializers> InitSeqs;
+  std::vector<shared::PerObjectRegisterableSections> BootstrapPORSs;
+
+  DenseMap<JITTargetAddress, JITDylib *> HeaderAddrToJITDylib;
+  DenseMap<JITDylib *, uint64_t> JITDylibToPThreadKey;
 };
 
 } // end namespace orc

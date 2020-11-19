@@ -200,7 +200,7 @@ public:
   }
 
   /// Set the content for this block.
-  /// Caller is responsible for ensuring the underlying bytes are not
+  /// Caller is responsible for ensuring that the underlying bytes are not
   /// deallocated while pointed to by this block.
   void setContent(ArrayRef<char> Content) {
     Data = Content.data();
@@ -876,6 +876,12 @@ public:
     return ArrayRef<char>(AllocatedBuffer, SourceStr.size());
   }
 
+  /// Allocate a mutable buffer.
+  MutableArrayRef<char> allocateBuffer(uint64_t Size) {
+    char *Data = Allocator.Allocate<char>(Size);
+    return {Data, Size};
+  }
+
   /// Create a section with the given name, protection flags, and alignment.
   Section &createSection(StringRef Name, sys::Memory::ProtectionFlags Prot) {
     assert(llvm::find_if(Sections,
@@ -1386,6 +1392,18 @@ struct PassConfiguration {
   ///
   /// Notable use cases: Testing and validation.
   LinkGraphPassList PostFixupPasses;
+
+  /// Post-finalization passes.
+  ///
+  /// These passes are called on the graph after the target memory has been
+  /// finalized, and before the call to Context::notifyFinalized. All block
+  /// content will have been transferred to target memory at the assigned
+  /// addresses, and memory protections will have been applied. Memory and
+  /// addresses for this graph are safe to access, but dependencies (memory
+  /// reachable via external symbols) may not be available yet.
+  ///
+  /// Notable use cases: EH-frame and TLV registration.
+  LinkGraphPassList PostFinalizationPasses;
 };
 
 /// Flags for symbol lookup.

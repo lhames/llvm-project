@@ -913,21 +913,16 @@ int runOrcJIT(const char *ProgName) {
   // Set up LLJIT platform.
   {
     LLJITPlatform P = Platform;
-    if (P == LLJITPlatform::DetectHost) {
-      if (TT->isOSBinFormatMachO())
-        P = LLJITPlatform::MachO;
-      else
-        P = LLJITPlatform::GenericIR;
-    }
+    if (P == LLJITPlatform::DetectHost)
+      P = LLJITPlatform::GenericIR;
 
     switch (P) {
     case LLJITPlatform::GenericIR:
       // Nothing to do: LLJITBuilder will use this by default.
       break;
     case LLJITPlatform::MachO:
-      Builder.setPlatformSetUp(orc::setUpMachOPlatform);
-      ExitOnErr(orc::enableObjCRegistration("libobjc.dylib"));
-      break;
+      errs() << "The MachO platform has been temporarily disabled.\n";
+      return 1;
     case LLJITPlatform::Inactive:
       Builder.setPlatformSetUp(orc::setUpInactivePlatform);
       break;

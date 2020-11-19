@@ -777,7 +777,7 @@ reexports(JITDylib &SourceJD, SymbolAliasMap Aliases,
 /// Build a SymbolAliasMap for the common case where you want to re-export
 /// symbols from another JITDylib with the same linkage/flags.
 Expected<SymbolAliasMap>
-buildSimpleReexportsAAliasMap(JITDylib &SourceJD, const SymbolNameSet &Symbols);
+buildSimpleReexportsAliasMap(JITDylib &SourceJD, const SymbolNameSet &Symbols);
 
 /// Represents the state that a symbol has reached during materialization.
 enum class SymbolState : uint8_t {
@@ -936,6 +936,14 @@ public:
   /// the order that they were added) to potentially generate a definition.
   template <typename GeneratorT>
   GeneratorT &addGenerator(std::unique_ptr<GeneratorT> DefGenerator);
+
+  /// Add a generator to the start of the generators list and return a
+  /// reference to it.
+  ///
+  /// This 'push_front' variant of 'addGenerator' is useful when you want the
+  /// generator that you are adding to run before any existing generators.
+  template <typename GeneratorT>
+  GeneratorT &prependGenerator(std::unique_ptr<GeneratorT> DefGenerator);
 
   /// Remove a definition generator from this JITDylib.
   ///
@@ -1195,6 +1203,9 @@ class Platform {
 public:
   virtual ~Platform();
 
+  /// Shut down the platform. This may trigger calls to the runtime.
+  virtual Error shutdown() = 0;
+
   /// This method will be called outside the session lock each time a JITDylib
   /// is created (unless it is created with EmptyJITDylib set) to allow the
   /// Platform to install any JITDylib specific standard symbols (e.g
@@ -1205,10 +1216,6 @@ public:
   /// MaterializationUnit is added to a JITDylib.
   virtual Error notifyAdding(ResourceTracker &RT,
                              const MaterializationUnit &MU) = 0;
-
-  /// This method will be called under the ExecutionSession lock when a
-  /// ResourceTracker is removed.
-  virtual Error notifyRemoving(ResourceTracker &RT) = 0;
 
   /// A utility function for looking up initializer symbols. Performs a blocking
   /// lookup for the given symbols in each of the given JITDylibs.
@@ -1497,6 +1504,33 @@ private:
       OutstandingMUs;
 };
 
+/// ReexportsGenerator can be used with JITDylib::addGenerator to automatically
+/// re-export a subset of the source JITDylib's symbols in the target.
+class ReexportsGenerator : public DefinitionGenerator {
+public:
+  using SymbolPredicate = std::function<bool(SymbolStringPtr)>;
+
+  /// Create a reexports generator. If an Allow predicate is passed, only
+  /// symbols for which the predicate returns true will be reexported. If no
+  /// Allow predicate is passed, all symbols will be exported.
+  ReexportsGenerator(JITDylib &SourceJD,
+                     JITDylibLookupFlags SourceJDLookupFlags,
+                     SymbolPredicate Allow = SymbolPredicate());
+
+  Error tryToGenerate(LookupState &LS, LookupKind K, JITDylib &JD,
+                      JITDylibLookupFlags JDLookupFlags,
+                      const SymbolLookupSet &LookupSet) override;
+
+private:
+  JITDylib &SourceJD;
+  JITDylibLookupFlags SourceJDLookupFlags;
+  SymbolPredicate Allow;
+};
+
+// --------------- IMPLEMENTATION --------------
+// Implementations for inline functions/methods.
+// ---------------------------------------------
+
 inline ExecutionSession &MaterializationResponsibility::getExecutionSession() {
   return JD->getExecutionSession();
 }
@@ -1518,6 +1552,15 @@ GeneratorT &JITDylib::addGenerator(std::unique_ptr<GeneratorT> DefGenerator) {
   auto &G = *DefGenerator;
   std::lock_guard<std::mutex> Lock(GeneratorsMutex);
   DefGenerators.push_back(std::move(DefGenerator));
+  return G;
+}
+
+template <typename GeneratorT>
+GeneratorT &
+JITDylib::prependGenerator(std::unique_ptr<GeneratorT> DefGenerator) {
+  auto &G = *DefGenerator;
+  std::lock_guard<std::mutex> Lock(GeneratorsMutex);
+  DefGenerators.insert(DefGenerators.begin(), std::move(DefGenerator));
   return G;
 }
 
@@ -1608,33 +1651,6 @@ Error JITDylib::define(std::unique_ptr<MaterializationUnitType> &MU,
     return Error::success();
   });
 }
-
-/// ReexportsGenerator can be used with JITDylib::addGenerator to automatically
-/// re-export a subset of the source JITDylib's symbols in the target.
-class ReexportsGenerator : public DefinitionGenerator {
-public:
-  using SymbolPredicate = std::function<bool(SymbolStringPtr)>;
-
-  /// Create a reexports generator. If an Allow predicate is passed, only
-  /// symbols for which the predicate returns true will be reexported. If no
-  /// Allow predicate is passed, all symbols will be exported.
-  ReexportsGenerator(JITDylib &SourceJD,
-                     JITDylibLookupFlags SourceJDLookupFlags,
-                     SymbolPredicate Allow = SymbolPredicate());
-
-  Error tryToGenerate(LookupState &LS, LookupKind K, JITDylib &JD,
-                      JITDylibLookupFlags JDLookupFlags,
-                      const SymbolLookupSet &LookupSet) override;
-
-private:
-  JITDylib &SourceJD;
-  JITDylibLookupFlags SourceJDLookupFlags;
-  SymbolPredicate Allow;
-};
-
-// --------------- IMPLEMENTATION --------------
-// Implementations for inline functions/methods.
-// ---------------------------------------------
 
 inline MaterializationResponsibility::~MaterializationResponsibility() {
   JD->getExecutionSession().OL_destroyMaterializationResponsibility(*this);

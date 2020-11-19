@@ -9,6 +9,7 @@
 #include "llvm/ExecutionEngine/Orc/TargetProcess/JITLoaderGDB.h"
 
 #include "llvm/ExecutionEngine/JITSymbol.h"
+#include "llvm/ExecutionEngine/Orc/Shared/WrapperFunctionUtils.h"
 #include "llvm/Support/BinaryStreamReader.h"
 #include "llvm/Support/ManagedStatic.h"
 
@@ -79,10 +80,10 @@ static std::pair<const char *, uint64_t> readDebugObjectInfo(uint8_t *ArgData,
   return std::make_pair(jitTargetAddressToPointer<const char *>(Addr), Size);
 }
 
-extern "C" orc::tpctypes::CWrapperFunctionResult
+extern "C" LLVMOrcSharedCWrapperFunctionResult
 llvm_orc_registerJITLoaderGDBWrapper(uint8_t *Data, uint64_t Size) {
   if (Size != sizeof(uint64_t) + sizeof(uint64_t))
-    return orc::tpctypes::WrapperFunctionResult::from(
+    return orc::shared::WrapperFunctionResult::fromStringLiteral(
                "Invalid arguments to llvm_orc_registerJITLoaderGDBWrapper")
         .release();
 
@@ -106,5 +107,5 @@ llvm_orc_registerJITLoaderGDBWrapper(uint8_t *Data, uint64_t Size) {
   __jit_debug_descriptor.action_flag = JIT_REGISTER_FN;
   __jit_debug_register_code();
 
-  return orc::tpctypes::WrapperFunctionResult().release();
+  return orc::shared::WrapperFunctionResult().release();
 }

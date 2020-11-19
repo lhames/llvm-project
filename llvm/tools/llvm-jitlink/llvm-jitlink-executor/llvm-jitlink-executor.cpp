@@ -15,12 +15,16 @@
 #include "llvm/ExecutionEngine/Orc/TargetProcess/JITLoaderGDB.h"
 #include "llvm/ExecutionEngine/Orc/TargetProcess/OrcRPCTPCServer.h"
 #include "llvm/ExecutionEngine/Orc/TargetProcess/RegisterEHFrames.h"
+#include "llvm/ExecutionEngine/Orc/TargetProcess/TargetExecutionUtils.h"
 #include "llvm/Support/DynamicLibrary.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/raw_ostream.h"
+
 #include <cstring>
+#include <future>
 #include <sstream>
+#include <thread>
 
 #ifdef LLVM_ON_UNIX
 
@@ -32,6 +36,10 @@
 
 using namespace llvm;
 using namespace llvm::orc;
+
+using JITLinkExecutorEndpoint =
+    shared::MultiThreadedRPCEndpoint<shared::FDRawByteChannel>;
+using JITLinkExecutorServer = OrcRPCTPCServer<JITLinkExecutorEndpoint>;
 
 ExitOnError ExitOnErr;
 
@@ -103,6 +111,14 @@ int openListener(std::string Host, std::string PortStr) {
 #endif // LLVM_ON_UNIX
 }
 
+static bool UseTestResultOverride = false;
+static int64_t TestResultOverride = 0;
+
+extern "C" void llvm_jitlink_setTestResultOverride(int64_t Value) {
+  TestResultOverride = Value;
+  UseTestResultOverride = true;
+}
+
 int main(int argc, char *argv[]) {
 
   ExitOnErr.setBanner(std::string(argv[0]) + ": ");
@@ -147,10 +163,43 @@ int main(int argc, char *argv[]) {
 
   shared::FDRawByteChannel C(InFD, OutFD);
   JITLinkExecutorEndpoint EP(C, true);
-  OrcRPCTPCServer<JITLinkExecutorEndpoint> Server(EP);
-  Server.setProgramName(std::string("llvm-jitlink-executor"));
 
-  ExitOnErr(Server.run());
+  struct MainInvocation {
+    std::function<Error(Expected<int64_t>)> SendResult;
+    JITTargetAddress MainAddr;
+    std::vector<std::string> Args;
+  };
+
+  auto MIP = std::make_unique<std::promise<MainInvocation>>();
+  auto MIF = MIP->get_future();
+
+  JITLinkExecutorServer Server(
+      EP, [&](std::function<Error(Expected<int64_t>)> SendResult,
+              JITTargetAddress MainAddr, std::vector<std::string> Args) {
+        if (MIP) {
+          MIP->set_value({std::move(SendResult), MainAddr, std::move(Args)});
+          MIP = nullptr;
+        } else
+          ExitOnErr(SendResult(make_error<StringError>(
+              "runMain already invoked", inconvertibleErrorCode())));
+        return Error::success();
+      });
+
+  std::thread ListenerThread([&]() { ExitOnErr(Server.run()); });
+
+  auto MI = MIF.get();
+
+  using MainTy = int (*)(int, char *[]);
+  int64_t Result = runAsMain(jitTargetAddressToPointer<MainTy>(MI.MainAddr),
+                             MI.Args, StringRef("llvm-jitlink-executor"));
+
+  // If the executing code set a test result override then use that.
+  if (UseTestResultOverride)
+    Result = TestResultOverride;
+
+  ExitOnErr(MI.SendResult(Result));
+
+  ListenerThread.join();
 
   return 0;
 }

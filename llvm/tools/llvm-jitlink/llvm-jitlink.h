@@ -13,6 +13,7 @@
 #ifndef LLVM_TOOLS_LLVM_JITLINK_LLVM_JITLINK_H
 #define LLVM_TOOLS_LLVM_JITLINK_LLVM_JITLINK_H
 
+#include "llvm/ADT/FunctionExtras.h"
 #include "llvm/ADT/Optional.h"
 #include "llvm/ADT/StringSet.h"
 #include "llvm/ADT/Triple.h"
@@ -25,6 +26,7 @@
 #include "llvm/ExecutionEngine/RuntimeDyldChecker.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/Regex.h"
+#include "llvm/Support/ThreadPool.h"
 #include "llvm/Support/raw_ostream.h"
 
 #include <vector>
@@ -71,12 +73,28 @@ private:
   using LLVMJITLinkRemoteMemoryManager =
       orc::OrcRPCTPCJITLinkMemoryManager<LLVMJITLinkRemoteTargetProcessControl>;
 
+  class ThreadPoolDispatcher {
+  public:
+    ThreadPoolDispatcher() = default;
+    ThreadPoolDispatcher(ThreadPoolDispatcher &&) = default;
+    ThreadPoolDispatcher &operator=(ThreadPoolDispatcher &&) = default;
+    void operator()(std::function<void()> Task) { P->async(std::move(Task)); }
+    ~ThreadPoolDispatcher() {
+      if (P)
+        P->wait();
+    }
+
+  private:
+    std::unique_ptr<ThreadPool> P{std::make_unique<ThreadPool>()};
+  };
+
   LLVMJITLinkRemoteTargetProcessControl(
       std::shared_ptr<orc::SymbolStringPool> SSP,
       std::unique_ptr<LLVMJITLinkChannel> Channel,
       std::unique_ptr<LLVMJITLinkRPCEndpoint> Endpoint,
       ErrorReporter ReportError, Error &Err)
-      : BaseT(std::move(SSP), *Endpoint, std::move(ReportError)),
+      : BaseT(std::move(SSP), *Endpoint, std::move(ReportError),
+              ThreadPoolDispatcher()),
         Channel(std::move(Channel)), Endpoint(std::move(Endpoint)) {
     ErrorAsOutParameter _(&Err);
 
@@ -111,7 +129,7 @@ private:
 struct Session {
   std::unique_ptr<orc::TargetProcessControl> TPC;
   orc::ExecutionSession ES;
-  orc::JITDylib *MainJD;
+  orc::JITDylib *MainJD = nullptr;
   LLVMJITLinkObjectLinkingLayer ObjLayer;
   std::vector<orc::JITDylib *> JDSearchOrder;
 

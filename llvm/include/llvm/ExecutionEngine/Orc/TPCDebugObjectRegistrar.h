@@ -46,7 +46,10 @@ public:
         SerializeBlockInfo(SerializeBlockInfo) {}
 
   Error registerDebugObject(sys::MemoryBlock TargetMem) override {
-    return TPC.runWrapper(RegisterFn, SerializeBlockInfo(TargetMem))
+    auto B = SerializeBlockInfo(TargetMem);
+    return TPC
+        .runWrapper(RegisterFn,
+                    {reinterpret_cast<const char *>(B.data()), B.size()})
         .takeError();
   }
 

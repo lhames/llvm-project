@@ -13,10 +13,10 @@
 #ifndef LLVM_EXECUTIONENGINE_ORC_TARGETPROCESS_JITLOADERGDB_H
 #define LLVM_EXECUTIONENGINE_ORC_TARGETPROCESS_JITLOADERGDB_H
 
-#include "llvm/ExecutionEngine/Orc/Shared/TargetProcessControlTypes.h"
+#include "llvm-c/OrcShared.h"
 #include <cstdint>
 
-extern "C" llvm::orc::tpctypes::CWrapperFunctionResult
+extern "C" LLVMOrcSharedCWrapperFunctionResult
 llvm_orc_registerJITLoaderGDBWrapper(uint8_t *Data, uint64_t Size);
 
 #endif // LLVM_EXECUTIONENGINE_ORC_TARGETPROCESS_JITLOADERGDB_H

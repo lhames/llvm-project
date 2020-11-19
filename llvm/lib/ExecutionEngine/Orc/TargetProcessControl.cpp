@@ -10,10 +10,13 @@
 
 #include "llvm/ExecutionEngine/Orc/Core.h"
 #include "llvm/ExecutionEngine/Orc/TargetProcess/TargetExecutionUtils.h"
+#include "llvm/Support/FormatVariadic.h"
 #include "llvm/Support/Host.h"
 #include "llvm/Support/Process.h"
 
 #include <mutex>
+
+#define DEBUG_TYPE "orc"
 
 namespace llvm {
 namespace orc {
@@ -35,6 +38,9 @@ SelfTargetProcessControl::SelfTargetProcessControl(
   this->PageSize = PageSize;
   this->MemMgr = OwnedMemMgr.get();
   this->MemAccess = this;
+  this->JITDispatchInfo = {
+      pointerToJITTargetAddress(jitDispatchViaWrapperFunctionManager),
+      pointerToJITTargetAddress(&WFM)};
   if (this->TargetTriple.isOSBinFormatMachO())
     GlobalManglingPrefix = '_';
 }
@@ -95,19 +101,32 @@ SelfTargetProcessControl::lookupSymbols(ArrayRef<LookupRequest> Request) {
   return R;
 }
 
-Expected<int32_t>
+Expected<int64_t>
 SelfTargetProcessControl::runAsMain(JITTargetAddress MainFnAddr,
                                     ArrayRef<std::string> Args) {
   using MainTy = int (*)(int, char *[]);
   return orc::runAsMain(jitTargetAddressToFunction<MainTy>(MainFnAddr), Args);
 }
 
-Expected<tpctypes::WrapperFunctionResult>
+Expected<shared::WrapperFunctionResult>
 SelfTargetProcessControl::runWrapper(JITTargetAddress WrapperFnAddr,
-                                     ArrayRef<uint8_t> ArgBuffer) {
+                                     ArrayRef<char> ArgBuffer) {
   using WrapperFnTy =
-      tpctypes::CWrapperFunctionResult (*)(const uint8_t *Data, uint64_t Size);
+      LLVMOrcSharedCWrapperFunctionResult (*)(const char *Data, uint64_t Size);
   auto *WrapperFn = jitTargetAddressToFunction<WrapperFnTy>(WrapperFnAddr);
+  LLVM_DEBUG({
+    dbgs() << "Calling wrapper function " << formatv("{0:x}", WrapperFnAddr)
+           << " with arg buffer:\n";
+    for (size_t I = 0; I != ArgBuffer.size(); ++I) {
+      if (I % 16 == 0)
+        dbgs() << " ";
+      dbgs() << " " << formatv("{0:x2}", ArgBuffer[I]);
+      if (I % 16 == 15)
+        dbgs() << "\n";
+    }
+    if (ArgBuffer.size() % 16)
+      dbgs() << "\n";
+  });
   return WrapperFn(ArgBuffer.data(), ArgBuffer.size());
 }
 
@@ -147,6 +166,20 @@ void SelfTargetProcessControl::writeBuffers(ArrayRef<tpctypes::BufferWrite> Ws,
     memcpy(jitTargetAddressToPointer<char *>(W.Address), W.Buffer.data(),
            W.Buffer.size());
   OnWriteComplete(Error::success());
+}
+
+LLVMOrcSharedCWrapperFunctionResult
+SelfTargetProcessControl::jitDispatchViaWrapperFunctionManager(
+    void *Ctx, const void *FnTag, const char *Data, size_t Size) {
+  auto R = static_cast<WrapperFunctionManager *>(Ctx)->runWrapper(
+      pointerToJITTargetAddress(FnTag), {Data, Size});
+  if (!R) {
+    auto ErrMsg = toString(R.takeError());
+    return shared::WrapperFunctionResult::createOutOfBandErrorFromString(
+               ErrMsg.data())
+        .release();
+  }
+  return R->release();
 }
 
 } // end namespace orc

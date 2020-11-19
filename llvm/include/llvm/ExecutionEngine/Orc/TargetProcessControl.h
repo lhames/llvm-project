@@ -19,6 +19,8 @@
 #include "llvm/ExecutionEngine/JITLink/JITLinkMemoryManager.h"
 #include "llvm/ExecutionEngine/Orc/Core.h"
 #include "llvm/ExecutionEngine/Orc/Shared/TargetProcessControlTypes.h"
+#include "llvm/ExecutionEngine/Orc/Shared/WrapperFunctionUtils.h"
+#include "llvm/ExecutionEngine/Orc/WrapperFunctionManager.h"
 #include "llvm/Support/DynamicLibrary.h"
 #include "llvm/Support/MSVCErrorWorkarounds.h"
 
@@ -106,17 +108,23 @@ public:
   /// Return a shared pointer to the SymbolStringPool for this instance.
   std::shared_ptr<SymbolStringPool> getSymbolStringPool() const { return SSP; }
 
+  /// Get the WrapperFunctionManager for this instance.
+  WrapperFunctionManager &getWrapperFunctionManager() { return WFM; }
+
   /// Return the Triple for the target process.
   const Triple &getTargetTriple() const { return TargetTriple; }
 
   /// Get the page size for the target process.
   unsigned getPageSize() const { return PageSize; }
 
+  /// Return a JITLinkMemoryManager for the target process.
+  jitlink::JITLinkMemoryManager &getMemMgr() const { return *MemMgr; }
+
   /// Return a MemoryAccess object for the target process.
   MemoryAccess &getMemoryAccess() const { return *MemAccess; }
 
-  /// Return a JITLinkMemoryManager for the target process.
-  jitlink::JITLinkMemoryManager &getMemMgr() const { return *MemMgr; }
+  /// Return the address of the JIT dispatch context pointer.
+  tpctypes::JITDispatchInfo getJITDispatchInfo() { return JITDispatchInfo; }
 
   /// Load the dynamic library at the given path and return a handle to it.
   /// If LibraryPath is null this function will return the global handle for
@@ -134,17 +142,17 @@ public:
   lookupSymbols(ArrayRef<LookupRequest> Request) = 0;
 
   /// Run function with a main-like signature.
-  virtual Expected<int32_t> runAsMain(JITTargetAddress MainFnAddr,
+  virtual Expected<int64_t> runAsMain(JITTargetAddress MainFnAddr,
                                       ArrayRef<std::string> Args) = 0;
 
   /// Run a wrapper function with signature:
   ///
   /// \code{.cpp}
-  ///   CWrapperFunctionResult fn(uint8_t *Data, uint64_t Size);
+  ///   CWrapperFunctionResult fn(const char *Data, uint64_t Size);
   /// \endcode{.cpp}
   ///
-  virtual Expected<tpctypes::WrapperFunctionResult>
-  runWrapper(JITTargetAddress WrapperFnAddr, ArrayRef<uint8_t> ArgBuffer) = 0;
+  virtual Expected<shared::WrapperFunctionResult>
+  runWrapper(JITTargetAddress WrapperFnAddr, ArrayRef<char> ArgBuffer) = 0;
 
   /// Disconnect from the target process.
   ///
@@ -156,10 +164,12 @@ protected:
       : SSP(std::move(SSP)) {}
 
   std::shared_ptr<SymbolStringPool> SSP;
+  WrapperFunctionManager WFM;
   Triple TargetTriple;
   unsigned PageSize = 0;
-  MemoryAccess *MemAccess = nullptr;
   jitlink::JITLinkMemoryManager *MemMgr = nullptr;
+  MemoryAccess *MemAccess = nullptr;
+  tpctypes::JITDispatchInfo JITDispatchInfo;
 };
 
 /// A TargetProcessControl implementation targeting the current process.
@@ -182,12 +192,11 @@ public:
   Expected<std::vector<tpctypes::LookupResult>>
   lookupSymbols(ArrayRef<LookupRequest> Request) override;
 
-  Expected<int32_t> runAsMain(JITTargetAddress MainFnAddr,
+  Expected<int64_t> runAsMain(JITTargetAddress MainFnAddr,
                               ArrayRef<std::string> Args) override;
 
-  Expected<tpctypes::WrapperFunctionResult>
-  runWrapper(JITTargetAddress WrapperFnAddr,
-             ArrayRef<uint8_t> ArgBuffer) override;
+  Expected<shared::WrapperFunctionResult>
+  runWrapper(JITTargetAddress WrapperFnAddr, ArrayRef<char> ArgBuffer) override;
 
   Error disconnect() override;
 
@@ -206,6 +215,10 @@ private:
 
   void writeBuffers(ArrayRef<tpctypes::BufferWrite> Ws,
                     WriteResultFn OnWriteComplete) override;
+
+  static LLVMOrcSharedCWrapperFunctionResult
+  jitDispatchViaWrapperFunctionManager(void *Ctx, const void *FnTag,
+                                       const char *Data, size_t Size);
 
   std::unique_ptr<jitlink::JITLinkMemoryManager> OwnedMemMgr;
   char GlobalManglingPrefix = 0;

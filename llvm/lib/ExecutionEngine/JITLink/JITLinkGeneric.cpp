@@ -175,6 +175,11 @@ void JITLinkerBase::linkPhase3(std::unique_ptr<JITLinkerBase> Self, Error Err) {
 
   if (Err)
     return deallocateAndBailOut(std::move(Err));
+
+  LLVM_DEBUG(dbgs() << "Running post-finalization passes.\n");
+  if (auto Err = runPasses(Passes.PostFinalizationPasses))
+    return deallocateAndBailOut(std::move(Err));
+
   Ctx->notifyFinalized(std::move(Alloc));
 
   LLVM_DEBUG({ dbgs() << "Link of graph " << G->getName() << " complete\n"; });

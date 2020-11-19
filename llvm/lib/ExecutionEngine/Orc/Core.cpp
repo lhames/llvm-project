@@ -1877,6 +1877,13 @@ void ExecutionSession::lookup(
     });
   });
 
+  // Bail out early if this is an empty lookup.
+  if (Symbols.empty()) {
+    LLVM_DEBUG(dbgs() << "  Lookup set is empty. Trivially complete.");
+    NotifyComplete(SymbolMap());
+    return;
+  }
+
   // lookup can be re-entered recursively if running on a single thread. Run any
   // outstanding MUs in case this query depends on them, otherwise this lookup
   // will starve waiting for a result from an MU that is stuck in the queue.
@@ -2015,18 +2022,19 @@ Error ExecutionSession::removeResourceTracker(ResourceTracker &RT) {
   JITDylib::AsynchronousSymbolQuerySet QueriesToFail;
   std::shared_ptr<SymbolDependenceMap> FailedSymbols;
 
-  runSessionLocked([&] {
+  auto Err = runSessionLocked([&]() -> Error {
     CurrentResourceManagers = ResourceManagers;
     RT.makeDefunct();
     std::tie(QueriesToFail, FailedSymbols) = RT.getJITDylib().removeTracker(RT);
+    return Error::success();
   });
 
-  Error Err = Error::success();
-
+  // Notify all registered resource managers that the tracker is being removed.
   for (auto *L : reverse(CurrentResourceManagers))
     Err =
         joinErrors(std::move(Err), L->handleRemoveResources(RT.getKeyUnsafe()));
 
+  // Fail any queries depending on removed symbols.
   for (auto &Q : QueriesToFail)
     Q->handleFailed(make_error<FailedToMaterialize>(FailedSymbols));
 
@@ -2460,7 +2468,7 @@ void ExecutionSession::OL_completeLookup(
       }
     }
 
-    LLVM_DEBUG(dbgs() << "Stripping unmatched weakly-refererced symbols\n");
+    LLVM_DEBUG(dbgs() << "Stripping unmatched weakly-referenced symbols\n");
     IPLS->LookupSet.forEachWithRemoval(
         [&](const SymbolStringPtr &Name, SymbolLookupFlags SymLookupFlags) {
           if (SymLookupFlags == SymbolLookupFlags::WeaklyReferencedSymbol) {

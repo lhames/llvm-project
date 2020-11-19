@@ -23,7 +23,7 @@
 
 using namespace llvm;
 using namespace llvm::orc;
-using namespace llvm::orc::tpctypes;
+using namespace llvm::orc::shared;
 
 namespace llvm {
 namespace orc {
@@ -155,10 +155,10 @@ Error deregisterEHFrameSection(const void *EHFrameSectionAddr,
 } // end namespace orc
 } // end namespace llvm
 
-extern "C" CWrapperFunctionResult
+extern "C" LLVMOrcSharedCWrapperFunctionResult
 llvm_orc_registerEHFrameSectionWrapper(uint8_t *Data, uint64_t Size) {
   if (Size != sizeof(uint64_t) + sizeof(uint64_t))
-    return WrapperFunctionResult::from(
+    return WrapperFunctionResult::fromStringLiteral(
                "Invalid arguments to llvm_orc_registerEHFrameSectionWrapper")
         .release();
 
@@ -176,15 +176,15 @@ llvm_orc_registerEHFrameSectionWrapper(uint8_t *Data, uint64_t Size) {
           jitTargetAddressToPointer<void *>(EHFrameSectionAddr),
           EHFrameSectionSize)) {
     auto ErrMsg = toString(std::move(Err));
-    return WrapperFunctionResult::from(ErrMsg).release();
+    return WrapperFunctionResult::copyFrom(ErrMsg).release();
   }
   return WrapperFunctionResult().release();
 }
 
-extern "C" CWrapperFunctionResult
+extern "C" LLVMOrcSharedCWrapperFunctionResult
 llvm_orc_deregisterEHFrameSectionWrapper(uint8_t *Data, uint64_t Size) {
   if (Size != sizeof(uint64_t) + sizeof(uint64_t))
-    return WrapperFunctionResult::from(
+    return WrapperFunctionResult::fromStringLiteral(
                "Invalid arguments to llvm_orc_registerEHFrameSectionWrapper")
         .release();
 
@@ -202,7 +202,7 @@ llvm_orc_deregisterEHFrameSectionWrapper(uint8_t *Data, uint64_t Size) {
           jitTargetAddressToPointer<void *>(EHFrameSectionAddr),
           EHFrameSectionSize)) {
     auto ErrMsg = toString(std::move(Err));
-    return WrapperFunctionResult::from(ErrMsg).release();
+    return WrapperFunctionResult::copyFrom(ErrMsg).release();
   }
   return WrapperFunctionResult().release();
 }

@@ -15,7 +15,9 @@
 #define LLVM_EXECUTIONENGINE_ORC_TARGETPROCESS_REGISTEREHFRAMES_H
 
 #include "llvm/ExecutionEngine/Orc/Shared/TargetProcessControlTypes.h"
+#include "llvm/ExecutionEngine/Orc/Shared/WrapperFunctionUtils.h"
 #include "llvm/Support/Error.h"
+
 #include <vector>
 
 namespace llvm {
@@ -32,10 +34,10 @@ Error deregisterEHFrameSection(const void *EHFrameSectionAddr,
 } // end namespace orc
 } // end namespace llvm
 
-extern "C" llvm::orc::tpctypes::CWrapperFunctionResult
+extern "C" LLVMOrcSharedCWrapperFunctionResult
 llvm_orc_registerEHFrameSectionWrapper(uint8_t *Data, uint64_t Size);
 
-extern "C" llvm::orc::tpctypes::CWrapperFunctionResult
+extern "C" LLVMOrcSharedCWrapperFunctionResult
 llvm_orc_deregisterEHFrameSectionWrapper(uint8_t *Data, uint64_t Size);
 
 #endif // LLVM_EXECUTIONENGINE_ORC_TARGETPROCESS_REGISTEREHFRAMES_H

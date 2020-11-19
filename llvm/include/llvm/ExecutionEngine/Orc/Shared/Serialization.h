@@ -12,6 +12,7 @@
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ExecutionEngine/Orc/Shared/OrcError.h"
+#include "llvm/ExecutionEngine/Orc/Shared/WrapperFunctionUtils.h"
 #include "llvm/Support/thread.h"
 #include <map>
 #include <mutex>
@@ -56,6 +57,11 @@ operator<<(OStream &OS,
 template <> class SerializationTypeName<void> {
 public:
   static const char *getName() { return "void"; }
+};
+
+template <> class SerializationTypeName<char> {
+public:
+  static const char *getName() { return "char"; }
 };
 
 template <> class SerializationTypeName<int8_t> {
@@ -203,6 +209,11 @@ public:
     }();
     return Name.data();
   }
+};
+
+template <> class SerializationTypeName<WrapperFunctionResult> {
+public:
+  static const char *getName() { return "WrapperFunctionResult"; }
 };
 
 /// The SerializationTraits<ChannelT, T> class describes how to serialize and
