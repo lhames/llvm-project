@@ -8,9 +8,9 @@
 //
 // MachO types shared with the Orc Runtime.
 //
-// WARNING: This header should not include wrapper function headers and STL
-// headers only. No other LLVM headers should be included. This allows this
-// header to be shared with the ORC runtime.
+// WARNING: This header should include wrapper function headers and STL headers
+// only. No other LLVM headers should be included. This allows this header to be
+// shared with the ORC runtime.
 //
 //===----------------------------------------------------------------------===//
 
