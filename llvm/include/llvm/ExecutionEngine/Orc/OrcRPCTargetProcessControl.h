@@ -403,23 +403,11 @@ protected:
   /// Subclasses must call this during construction to initialize the
   /// TargetTriple and PageSize members.
   Error initializeORCRPCTPCBase() {
-    if (auto TripleOrErr = EP.template callB<orcrpctpc::GetTargetTriple>())
-      TargetTriple = Triple(*TripleOrErr);
-    else
-      return TripleOrErr.takeError();
-
-    if (auto PageSizeOrErr = EP.template callB<orcrpctpc::GetPageSize>())
-      PageSize = *PageSizeOrErr;
-    else
-      return PageSizeOrErr.takeError();
-
-    if (auto JITDispatchInfoOrErr =
-            EP.template callB<orcrpctpc::GetJITDispatchInfo>())
-      JITDispatchInfo = *JITDispatchInfoOrErr;
-    else
-      return JITDispatchInfoOrErr.takeError();
-
-    return Error::success();
+    if (auto EPI = EP.template callB<orcrpctpc::GetExecutorProcessInfo>()) {
+      setExecutorProcessInfo(*EPI);
+      return Error::success();
+    } else
+      return EPI.takeError();
   }
 
 private:

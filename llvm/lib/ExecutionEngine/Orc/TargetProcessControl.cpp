@@ -25,6 +25,14 @@ TargetProcessControl::MemoryAccess::~MemoryAccess() {}
 
 TargetProcessControl::~TargetProcessControl() {}
 
+void TargetProcessControl::setExecutorProcessInfo(
+    const tpctypes::ExecutorProcessInfo &EPI) {
+  TargetTriple = Triple(EPI.TargetTriple);
+  PageSize = EPI.PageSize;
+  JDI.JITDispatchFunctionAddr = EPI.JITDispatchFunctionAddr;
+  JDI.JITDispatchContextAddr = EPI.JITDispatchContextAddr;
+}
+
 SelfTargetProcessControl::SelfTargetProcessControl(
     std::shared_ptr<SymbolStringPool> SSP, Triple TargetTriple,
     unsigned PageSize, std::unique_ptr<jitlink::JITLinkMemoryManager> MemMgr)
@@ -38,7 +46,7 @@ SelfTargetProcessControl::SelfTargetProcessControl(
   this->PageSize = PageSize;
   this->MemMgr = OwnedMemMgr.get();
   this->MemAccess = this;
-  this->JITDispatchInfo = {
+  this->JDI = {
       pointerToJITTargetAddress(jitDispatchViaWrapperFunctionManager),
       pointerToJITTargetAddress(&WFM)};
   if (this->TargetTriple.isOSBinFormatMachO())

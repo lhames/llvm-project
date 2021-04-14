@@ -135,9 +135,9 @@ public:
   static const char *getName() { return "ReleaseOrFinalizeMemRequestElement"; }
 };
 
-template <> class SerializationTypeName<tpctypes::JITDispatchInfo> {
+template <> class SerializationTypeName<tpctypes::ExecutorProcessInfo> {
 public:
-  static const char *getName() { return "JITDispatchInfo"; }
+  static const char *getName() { return "ExecutorProcessInfo"; }
 };
 
 template <typename ChannelT, typename WriteT>
@@ -233,16 +233,18 @@ public:
 };
 
 template <typename ChannelT>
-class SerializationTraits<ChannelT, tpctypes::JITDispatchInfo> {
+class SerializationTraits<ChannelT, tpctypes::ExecutorProcessInfo> {
 public:
-  static Error serialize(ChannelT &C, const tpctypes::JITDispatchInfo &JDI) {
-    return serializeSeq(C, JDI.JITDispatchFunctionAddr,
-                        JDI.JITDispatchContextAddr);
+  static Error serialize(ChannelT &C, const tpctypes::ExecutorProcessInfo &EPI) {
+    return serializeSeq(C, EPI.TargetTriple, EPI.PageSize,
+                        EPI.JITDispatchFunctionAddr,
+                        EPI.JITDispatchContextAddr);
   }
 
-  static Error deserialize(ChannelT &C, tpctypes::JITDispatchInfo &JDI) {
-    return deserializeSeq(C, JDI.JITDispatchFunctionAddr,
-                          JDI.JITDispatchContextAddr);
+  static Error deserialize(ChannelT &C, tpctypes::ExecutorProcessInfo &EPI) {
+    return deserializeSeq(C, EPI.TargetTriple, EPI.PageSize,
+                          EPI.JITDispatchFunctionAddr,
+                          EPI.JITDispatchContextAddr);
   }
 };
 
@@ -254,20 +256,9 @@ using RemoteSymbolLookupSet = std::vector<std::pair<std::string, bool>>;
 using RemoteLookupRequest =
     std::pair<tpctypes::DylibHandle, RemoteSymbolLookupSet>;
 
-class GetTargetTriple
-    : public shared::RPCFunction<GetTargetTriple, std::string()> {
-public:
-  static const char *getName() { return "GetTargetTriple"; }
-};
-
-class GetPageSize : public shared::RPCFunction<GetPageSize, uint64_t()> {
-public:
-  static const char *getName() { return "GetPageSize"; }
-};
-
-class GetJITDispatchInfo
-    : public shared::RPCFunction<GetJITDispatchInfo,
-                                 tpctypes::JITDispatchInfo()> {
+class GetExecutorProcessInfo
+    : public shared::RPCFunction<GetExecutorProcessInfo,
+                                 tpctypes::ExecutorProcessInfo()> {
 public:
   static const char *getName() { return "GetJITDispatchInfo"; }
 };
@@ -384,11 +375,8 @@ public:
     TripleStr = sys::getProcessTriple();
     PageSize = sys::Process::getPageSizeEstimate();
 
-    EP.template addHandler<orcrpctpc::GetTargetTriple>(*this,
-                                                       &ThisT::getTargetTriple);
-    EP.template addHandler<orcrpctpc::GetPageSize>(*this, &ThisT::getPageSize);
-    EP.template addHandler<orcrpctpc::GetJITDispatchInfo>(
-        *this, &ThisT::getJITDispatchInfo);
+    EP.template addHandler<orcrpctpc::GetExecutorProcessInfo>(
+        *this, &ThisT::getExecutorProcessInfo);
     EP.template addHandler<orcrpctpc::ReserveMem>(*this, &ThisT::reserveMemory);
     EP.template addHandler<orcrpctpc::FinalizeMem>(*this,
                                                    &ThisT::finalizeMemory);
@@ -462,12 +450,10 @@ private:
     return R->release();
   }
 
-  std::string getTargetTriple() { return TripleStr; }
-  uint64_t getPageSize() { return PageSize; }
-
-  tpctypes::JITDispatchInfo getJITDispatchInfo() {
-    return {pointerToJITTargetAddress(jitDispatchViaOrcRPCTPCServer),
-            pointerToJITTargetAddress(this)};
+  tpctypes::ExecutorProcessInfo getExecutorProcessInfo() {
+    return {TripleStr, static_cast<uint32_t>(PageSize),
+            pointerToJITTargetAddress(jitDispatchViaOrcRPCTPCServer),
+            pointerToJITTargetAddress(this) };
   }
 
   template <typename WriteT>

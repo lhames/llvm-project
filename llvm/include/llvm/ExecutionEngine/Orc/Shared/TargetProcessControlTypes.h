@@ -61,7 +61,9 @@ using DylibHandle = JITTargetAddress;
 
 using LookupResult = std::vector<JITTargetAddress>;
 
-struct JITDispatchInfo {
+struct ExecutorProcessInfo {
+  std::string TargetTriple;
+  unsigned PageSize = 0;
   JITTargetAddress JITDispatchFunctionAddr = 0;
   JITTargetAddress JITDispatchContextAddr = 0;
 };

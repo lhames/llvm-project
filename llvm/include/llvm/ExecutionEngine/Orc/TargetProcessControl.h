@@ -100,6 +100,11 @@ public:
     const SymbolLookupSet &Symbols;
   };
 
+  struct JITDispatchInfo {
+    JITTargetAddress JITDispatchFunctionAddr = 0;
+    JITTargetAddress JITDispatchContextAddr = 0;
+  };
+
   virtual ~TargetProcessControl();
 
   /// Intern a symbol name in the SymbolStringPool.
@@ -124,7 +129,7 @@ public:
   MemoryAccess &getMemoryAccess() const { return *MemAccess; }
 
   /// Return the address of the JIT dispatch context pointer.
-  tpctypes::JITDispatchInfo getJITDispatchInfo() { return JITDispatchInfo; }
+  JITDispatchInfo getJITDispatchInfo() { return JDI; }
 
   /// Load the dynamic library at the given path and return a handle to it.
   /// If LibraryPath is null this function will return the global handle for
@@ -163,13 +168,15 @@ protected:
   TargetProcessControl(std::shared_ptr<SymbolStringPool> SSP)
       : SSP(std::move(SSP)) {}
 
+  void setExecutorProcessInfo(const tpctypes::ExecutorProcessInfo &EPI);
+
   std::shared_ptr<SymbolStringPool> SSP;
   WrapperFunctionManager WFM;
   Triple TargetTriple;
   unsigned PageSize = 0;
+  JITDispatchInfo JDI;
   jitlink::JITLinkMemoryManager *MemMgr = nullptr;
   MemoryAccess *MemAccess = nullptr;
-  tpctypes::JITDispatchInfo JITDispatchInfo;
 };
 
 /// A TargetProcessControl implementation targeting the current process.
