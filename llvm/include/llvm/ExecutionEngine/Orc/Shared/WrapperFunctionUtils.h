@@ -281,7 +281,7 @@ public:
   }
 
   template <typename... ArgTs>
-  bool fromBlob(const char *Data, size_t Size, ArgTs &...Args) {
+  static bool fromBlob(const char *Data, size_t Size, ArgTs &...Args) {
     BlobInputBuffer BIB(Data, Size);
     return deserialize(BIB, Args...);
   }
