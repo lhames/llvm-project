@@ -16,6 +16,8 @@
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/ExecutionEngine/Orc/Core.h"
+#include "llvm/ExecutionEngine/Orc/TargetProcessControl.h"
 #include "llvm/ExecutionEngine/Orc/Shared/WrapperFunctionUtils.h"
 #include "llvm/ExecutionEngine/Orc/Shared/WrapperFunctionUtilsErrors.h"
 #include "llvm/ExecutionEngine/Orc/Shared/WrapperFunctionUtilsStdList.h"
@@ -27,21 +29,37 @@ namespace llvm {
 namespace orc {
 namespace shared {
 
+/// Allow serialization of BlobSequences to/from ArrayRefs.
 template <typename BlobElementT, typename T>
 class TrivialBlobSequenceSerialization<BlobElementT, ArrayRef<T>> {
 public:
   static constexpr bool available = true;
 };
 
+/// Allow serialization of BlobSequences to/from MutableArrayRefs.
 template <typename BlobElementT, typename T>
 class TrivialBlobSequenceSerialization<BlobElementT, MutableArrayRef<T>> {
 public:
   static constexpr bool available = true;
 };
 
+/// Allow serialization of BlobStrings to/from StringRef.
 template <> class TrivialBlobSequenceSerialization<char, llvm::StringRef> {
 public:
   static constexpr bool available = true;
+};
+
+/// Allow serialization to BlobStrings from SymbolStringPtrs.
+template <>
+class BlobSerializationTraits<BlobString, SymbolStringPtr> {
+public:
+  static size_t size(const SymbolStringPtr &S) {
+    return BlobArgList<BlobString>::size(*S);
+  }
+
+  static bool serialize(BlobOutputBuffer &BOB, const SymbolStringPtr &S) {
+    return BlobArgList<BlobString>::serialize(BOB, *S);
+  }
 };
 
 using SerializableError = std::pair<bool, std::string>;
@@ -233,6 +251,38 @@ public:
 inline ArrayRef<char> toArrayRef(const WrapperFunctionResult &R) {
   return {R.data(), R.size()};
 }
+
+/// A convenience wrapper for WrapperFunction that looks up and caches the
+/// function tag.
+template <typename BlobSignature>
+class WrapperFunctionCaller {
+public:
+
+  static Expected<WrapperFunctionCaller>
+  Create(ExecutionSession &ES, TargetProcessControl &TPC,
+         JITDylib &JD, SymbolStringPtr FunctionName) {
+    if (auto FnTag = ES.lookup({&JD}, FunctionName))
+      return WrapperFunctionCaller(TPC, FnTag->getAddress());
+    else
+      return FnTag.takeError();
+  }
+
+  template <typename RetT, typename... ArgTs>
+  Expected<RetT> operator()(const ArgTs &... Args) {
+    RetT Result;
+    if (auto Err =
+        WrapperFunction<BlobSignature>::call(TPC, FnTag, Result, Args...))
+      return Err;
+    return Result;
+  }
+
+private:
+
+  WrapperFunctionCaller(TargetProcessControl &TPC, JITTargetAddress FnTag)
+    : TPC(TPC), FnTag(FnTag) {}
+  TargetProcessControl &TPC;
+  JITTargetAddress FnTag = 0;
+};
 
 } // end namespace shared
 } // end namespace orc
