@@ -758,8 +758,6 @@ __orc_rt_macho_run_program_wrapper(const char *ArgData, size_t ArgSize) {
   using RunProgramWrapperBlobSignature =
     int64_t(BlobString, BlobString, BlobSequence<BlobString>);
 
-  fprintf(stderr, "got to run program wrapper\n");
-
   return WrapperFunction<RunProgramWrapperBlobSignature>::handle(
       [](const std::string &JITDylibName, const std::string &EntrySymbolName,
          const std::vector<std::string> &Args) {
