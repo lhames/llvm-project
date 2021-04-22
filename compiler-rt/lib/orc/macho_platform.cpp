@@ -546,9 +546,9 @@ Expected<void *> MachOPlatformRuntimeState::dlopenInitialize(string_view Path,
     if (auto Err = initializeJITDylib(MOJDIs))
       return std::move(Err);
 
-  // Return the header for the first item in the list.
+  // Return the header for the last item in the list.
   auto *JDS = getJITDylibStateByHeaderAddr(
-      jitTargetAddressToPointer<void *>(InitSeq->front().getMachOHeader()));
+      jitTargetAddressToPointer<void *>(InitSeq->back().getMachOHeader()));
   assert(JDS && "Missing state entry for JD");
   return JDS->Header;
 }
