@@ -752,3 +752,35 @@ ORC_RT_INTERFACE int64_t __orc_rt_macho_run_program(const char *JITDylibName,
 
   return Result;
 }
+
+ORC_RT_INTERFACE LLVMOrcSharedCWrapperFunctionResult
+__orc_rt_macho_run_program_wrapper(const char *ArgData, size_t ArgSize) {
+  using RunProgramWrapperBlobSignature =
+    int64_t(BlobString, BlobString, BlobSequence<BlobString>);
+
+  fprintf(stderr, "got to run program wrapper\n");
+
+  return WrapperFunction<RunProgramWrapperBlobSignature>::handle(
+      [](const std::string &JITDylibName, const std::string &EntrySymbolName,
+         const std::vector<std::string> &Args) {
+
+        std::vector<std::unique_ptr<char[]>> MutableArgs;
+        MutableArgs.reserve(Args.size());
+
+        for (auto &Arg : Args) {
+          MutableArgs.push_back(std::make_unique<char[]>(Arg.size()));
+          strcpy(MutableArgs.back().get(), Arg.data());
+        }
+
+        std::vector<char*> ArgV;
+        ArgV.reserve(MutableArgs.size() + 1);
+        for (auto &MutableArg : MutableArgs)
+          ArgV.push_back(MutableArg.get());
+        ArgV.push_back(nullptr);
+
+        return __orc_rt_macho_run_program(JITDylibName.c_str(),
+                                          EntrySymbolName.c_str(),
+                                          ArgV.size() - 1,
+                                          ArgV.data());
+      }, ArgData, ArgSize).release();
+}
