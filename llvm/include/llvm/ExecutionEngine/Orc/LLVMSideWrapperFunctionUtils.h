@@ -252,9 +252,8 @@ inline ArrayRef<char> toArrayRef(const WrapperFunctionResult &R) {
   return {R.data(), R.size()};
 }
 
-/// A convenience wrapper for WrapperFunction that looks up and caches the
-/// function tag.
-template <typename BlobSignature>
+/// A utility to create a callable object for a wrapper function.
+template <typename RetT, typename BlobSignature>
 class WrapperFunctionCaller {
 public:
 
@@ -267,13 +266,39 @@ public:
       return FnTag.takeError();
   }
 
-  template <typename RetT, typename... ArgTs>
+  template <typename... ArgTs>
   Expected<RetT> operator()(const ArgTs &... Args) {
     RetT Result;
     if (auto Err =
         WrapperFunction<BlobSignature>::call(TPC, FnTag, Result, Args...))
-      return Err;
-    return Result;
+      return std::move(Err);
+    return std::move(Result);
+  }
+
+private:
+
+  WrapperFunctionCaller(TargetProcessControl &TPC, JITTargetAddress FnTag)
+    : TPC(TPC), FnTag(FnTag) {}
+  TargetProcessControl &TPC;
+  JITTargetAddress FnTag = 0;
+};
+
+/// Specialization of WrapperFunctionCaller for void functions.
+template <typename... BlobArgTs>
+class WrapperFunctionCaller<void, void(BlobArgTs...)> {
+
+  static Expected<WrapperFunctionCaller>
+  Create(ExecutionSession &ES, TargetProcessControl &TPC,
+         JITDylib &JD, SymbolStringPtr FunctionName) {
+    if (auto FnTag = ES.lookup({&JD}, FunctionName))
+      return WrapperFunctionCaller(TPC, FnTag->getAddress());
+    else
+      return FnTag.takeError();
+  }
+
+  template <typename... ArgTs>
+  Error operator()(const ArgTs &... Args) {
+    return WrapperFunction<void(BlobArgTs...)>::call(TPC, FnTag, Args...);
   }
 
 private:
