@@ -314,7 +314,7 @@ private:
   // FIXME: Move to thread-state.
   std::string DLFcnError;
 
-  std::mutex JDStatesMutex;
+  std::recursive_mutex JDStatesMutex;
   std::unordered_map<void *, PerJITDylibState> JDStates;
   std::unordered_map<std::string, void *> JDNameToHeader;
 
@@ -372,7 +372,7 @@ Error MachOPlatformRuntimeState::deregisterObjectSections(
 const char *MachOPlatformRuntimeState::dlerror() { return DLFcnError.c_str(); }
 
 void *MachOPlatformRuntimeState::dlopen(string_view Path, int Mode) {
-  std::lock_guard<std::mutex> Lock(JDStatesMutex);
+  std::lock_guard<std::recursive_mutex> Lock(JDStatesMutex);
 
   // Use fast path if all JITDylibs are already loaded and don't require
   // re-running initializers.
@@ -410,7 +410,7 @@ void *MachOPlatformRuntimeState::dlsym(void *DSOHandle, string_view Symbol) {
 int MachOPlatformRuntimeState::registerAtExit(void (*F)(void *), void *Arg,
                                               void *DSOHandle) {
   // FIXME: Handle out-of-memory errors, returning -1 if OOM.
-  std::lock_guard<std::mutex> Lock(JDStatesMutex);
+  std::lock_guard<std::recursive_mutex> Lock(JDStatesMutex);
   auto *JDS = getJITDylibStateByHeaderAddr(DSOHandle);
   assert(JDS && "JITDylib state not initialized");
   JDS->AtExits.push_back({F, Arg});
@@ -422,7 +422,7 @@ void MachOPlatformRuntimeState::runAtExits(void *DSOHandle) {
   // JDState?
   AtExitsVector V;
   {
-    std::lock_guard<std::mutex> Lock(JDStatesMutex);
+    std::lock_guard<std::recursive_mutex> Lock(JDStatesMutex);
     auto *JDS = getJITDylibStateByHeaderAddr(DSOHandle);
     assert(JDS && "JITDlybi state not initialized");
     std::swap(V, JDS->AtExits);
