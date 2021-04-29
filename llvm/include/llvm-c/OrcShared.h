@@ -30,19 +30,19 @@
 
 LLVM_C_EXTERN_C_BEGIN
 
-union LLVMOrcSharedCWrapperFunctionResultData {
+typedef union {
   char Value[sizeof(const char *)];
   const char *ValuePtr;
-};
+} LLVMOrcSharedCWrapperFunctionResultData;
 
 typedef void (*LLVMOrcSharedCWrapperFunctionResultDataDestructor)(
     LLVMOrcSharedCWrapperFunctionResultData, uint64_t Size);
 
-struct LLVMOrcSharedCWrapperFunctionResult {
+typedef struct {
   uint64_t Size;
   LLVMOrcSharedCWrapperFunctionResultData Data;
   LLVMOrcSharedCWrapperFunctionResultDataDestructor Destroy;
-};
+} LLVMOrcSharedCWrapperFunctionResult;
 
 typedef struct LLVMOrcSharedOpaqueJITProcessControl
     *LLVMOrcSharedJITProcessControlRef;
