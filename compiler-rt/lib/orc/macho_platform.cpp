@@ -308,7 +308,7 @@ private:
       {"__DATA,__objc_selrefs", registerObjCSelectors},
       {"__DATA,__objc_classlist", registerObjCClasses},
       {"__TEXT,__swift5_protos", registerSwift5Protocols},
-      {"__DATA,__swift5_proto", registerSwift5ProtocolConformances},
+      {"__TEXT,__swift5_proto", registerSwift5ProtocolConformances},
       {"__DATA,__mod_init_func", runModInits}};
 
   // FIXME: Move to thread-state.

@@ -131,7 +131,7 @@ StringRef ObjCImageInfoSectionName = "__DATA,__objc_image_info";
 std::string InitSectionNames[] = {
     "__DATA,__mod_init_func", "__DATA,__objc_selrefs",
     "__DATA,__objc_classlist", "__TEXT,__swift5_protos",
-    "__DATA,__swift5_proto"};
+    "__TEXT,__swift5_proto"};
 
 } // end anonymous namespace
 
