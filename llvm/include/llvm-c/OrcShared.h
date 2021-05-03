@@ -100,7 +100,7 @@ static inline const char *LLVMOrcSharedCWrapperFunctionResultGetOutOfBandError(
  */
 static inline const char *LLVMOrcSharedCWrapperFunctionResultGetData(
     LLVMOrcSharedCWrapperFunctionResult *R) {
-  return R->Size > sizeof(R->Data.Value) ? R->Data.Value : R->Data.ValuePtr;
+  return R->Size > sizeof(R->Data.Value) ? R->Data.ValuePtr : R->Data.Value;
 }
 
 LLVM_C_EXTERN_C_END
