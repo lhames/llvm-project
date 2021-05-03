@@ -50,7 +50,7 @@ typedef struct LLVMOrcSharedOpaqueJITProcessControl
 /**
  * Zero-initialize an LLVMOrcSharedCWrapperFunctionResult.
  */
-inline void
+static inline void
 LLVMOrcSharedCWraperFunctionResultInit(LLVMOrcSharedCWrapperFunctionResult *R) {
   R->Size = 0;
   R->Data.ValuePtr = 0;
@@ -61,7 +61,7 @@ LLVMOrcSharedCWraperFunctionResultInit(LLVMOrcSharedCWrapperFunctionResult *R) {
  * Create an LLVMOrcSharedCWrapperFunctionResult representing an out-of-band
  * error.
  */
-inline LLVMOrcSharedCWrapperFunctionResult
+static inline LLVMOrcSharedCWrapperFunctionResult
 LLVMOrcSharedCreateCWrapperFunctionResultFromOutOfBandError(
     const char *ErrMsg,
     LLVMOrcSharedCWrapperFunctionResultDataDestructor Destroy) {
@@ -76,7 +76,7 @@ LLVMOrcSharedCreateCWrapperFunctionResultFromOutOfBandError(
  * This should be called to destroy LLVMOrcSharedCWrapperFunctionResult values
  * regardless of their state.
  */
-inline void LLVMOrcSharedDisposeCWrapperFunctionResult(
+static inline void LLVMOrcSharedDisposeCWrapperFunctionResult(
     LLVMOrcSharedCWrapperFunctionResult *R) {
   if (R->Destroy)
     R->Destroy(R->Data, R->Size);
@@ -89,7 +89,7 @@ inline void LLVMOrcSharedDisposeCWrapperFunctionResult(
  * The LLVMOrcSharedCWrapperFunctionResult retains ownership of the error
  * string, so it should be copied if the caller wishes to preserve it.
  */
-inline const char *LLVMOrcSharedCWrapperFunctionResultGetOutOfBandError(
+static inline const char *LLVMOrcSharedCWrapperFunctionResultGetOutOfBandError(
     LLVMOrcSharedCWrapperFunctionResult *R) {
   return R->Size == 0 ? R->Data.ValuePtr : 0;
 }
@@ -98,7 +98,7 @@ inline const char *LLVMOrcSharedCWrapperFunctionResultGetOutOfBandError(
  * Get a pointer to the data contained in the given
  * LLVMOrcSharedCWrapperFunctionResult.
  */
-inline const char *LLVMOrcSharedCWrapperFunctionResultGetData(
+static inline const char *LLVMOrcSharedCWrapperFunctionResultGetData(
     LLVMOrcSharedCWrapperFunctionResult *R) {
   return R->Size > sizeof(R->Data.Value) ? R->Data.Value : R->Data.ValuePtr;
 }
