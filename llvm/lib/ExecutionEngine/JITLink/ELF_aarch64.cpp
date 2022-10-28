@@ -601,7 +601,7 @@ void link_ELF_aarch64(std::unique_ptr<LinkGraph> G,
     // Add eh-frame passes.
     Config.PrePrunePasses.push_back(DWARFRecordSectionSplitter(".eh_frame"));
     Config.PrePrunePasses.push_back(EHFrameEdgeFixer(
-        ".eh_frame", 8, aarch64::Pointer32, aarch64::Pointer64,
+        ".eh_frame", {}, 8, aarch64::Pointer32, aarch64::Pointer64,
         aarch64::Delta32, aarch64::Delta64, aarch64::NegDelta32));
     Config.PrePrunePasses.push_back(EHFrameNullTerminator(".eh_frame"));
 
