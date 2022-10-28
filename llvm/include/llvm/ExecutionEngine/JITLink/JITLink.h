@@ -686,6 +686,15 @@ raw_ostream &operator<<(raw_ostream &OS, const Symbol &A);
 void printEdge(raw_ostream &OS, const Block &B, const Edge &E,
                StringRef EdgeKindName);
 
+/// Returns true if both Symbols point to the same defined content
+/// (block and offset).
+/// Both symbols must be defined.
+inline bool sameDefinedTarget(const Symbol &S1, const Symbol &S2) {
+  assert(S1.isDefined() && "S1 is not a defined symbol");
+  assert(S2.isDefined() && "S2 is not a defined symbol");
+  return &S1.getBlock() == &S2.getBlock() && S1.getOffset() == S2.getOffset();
+}
+
 /// Represents an object file section.
 class Section {
   friend class LinkGraph;

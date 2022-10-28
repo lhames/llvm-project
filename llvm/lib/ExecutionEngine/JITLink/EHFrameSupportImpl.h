@@ -10,13 +10,15 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_LIB_EXECUTIONENGINE_JITLINK_EHFRAMESUPPORTIMPL_H
-#define LLVM_LIB_EXECUTIONENGINE_JITLINK_EHFRAMESUPPORTIMPL_H
+#ifndef LIB_EXECUTIONENGINE_JITLINK_EHFRAMESUPPORTIMPL_H
+#define LIB_EXECUTIONENGINE_JITLINK_EHFRAMESUPPORTIMPL_H
 
 #include "llvm/ExecutionEngine/JITLink/EHFrameSupport.h"
 
 #include "llvm/ExecutionEngine/JITLink/JITLink.h"
 #include "llvm/Support/BinaryStreamReader.h"
+
+#include "CompactUnwindSupportImpl.h"
 
 namespace llvm {
 namespace jitlink {
@@ -25,13 +27,22 @@ namespace jitlink {
 /// edges.
 class EHFrameEdgeFixer {
 public:
+
   /// Create an eh-frame edge fixer.
+  /// Adds edges for implicit relocations on platforms where these are used
+  /// (e.g. MachO/x86-64).
+  ///
+  /// If a CompactUnwindInfoManager is provided then it will be used to identify
+  /// and discard FDEs that are superseded by compact-unwind blocks.
+  ///
   /// If a given edge-kind is not supported on the target architecture then
   /// Edge::Invalid should be used.
-  EHFrameEdgeFixer(StringRef EHFrameSectionName, unsigned PointerSize,
-                   Edge::Kind Pointer32, Edge::Kind Pointer64,
-                   Edge::Kind Delta32, Edge::Kind Delta64,
-                   Edge::Kind NegDelta32);
+  EHFrameEdgeFixer(StringRef EHFrameSectionName,
+                   std::shared_ptr<CompactUnwindManager> CompactUnwindMgr,
+                   unsigned PointerSize, Edge::Kind Pointer32,
+                   Edge::Kind Pointer64, Edge::Kind Delta32,
+                   Edge::Kind Delta64, Edge::Kind NegDelta32);
+
   Error operator()(LinkGraph &G);
 
 private:
@@ -95,6 +106,8 @@ private:
                                         Block &InBlock, const char *FieldName);
   Error skipEncodedPointer(uint8_t PointerEncoding,
                            BinaryStreamReader &RecordReader);
+  Expected<uint64_t> readEncodedSize(uint8_t PointerEncoding,
+                                     BinaryStreamReader &RecordReader);
   Expected<Symbol *> getOrCreateEncodedPointerEdge(
       ParseContext &PC, const BlockEdgeMap &BlockEdges, uint8_t PointerEncoding,
       BinaryStreamReader &RecordReader, Block &BlockToFix,
@@ -104,6 +117,7 @@ private:
                                        orc::ExecutorAddr Addr);
 
   StringRef EHFrameSectionName;
+  std::shared_ptr<CompactUnwindManager> CompactUnwindMgr;
   unsigned PointerSize;
   Edge::Kind Pointer32;
   Edge::Kind Pointer64;
@@ -126,4 +140,4 @@ private:
 } // end namespace jitlink
 } // end namespace llvm
 
-#endif // LLVM_LIB_EXECUTIONENGINE_JITLINK_EHFRAMESUPPORTIMPL_H
+#endif // LIB_EXECUTIONENGINE_JITLINK_EHFRAMESUPPORTIMPL_H
