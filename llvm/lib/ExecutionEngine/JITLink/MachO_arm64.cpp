@@ -557,14 +557,15 @@ struct CompactUnwindTraits_MachO_arm64
   constexpr static size_t PointerSize = 8;
   constexpr static support::endianness Endianness = support::little;
 
-  static bool encodingSpecifiesDWARF(ArrayRef<char> RecordContent) {
-    constexpr uint32_t ModeMask = 0x0f000000;
+  constexpr static uint32_t EncodingModeMask = 0x0f000000;
+
+  static bool encodingSpecifiesDWARF(uint32_t Encoding) {
     constexpr uint32_t DWARFMode = 0x03000000;
-    return (readEncoding(RecordContent) & ModeMask) == DWARFMode;
+    return (Encoding & EncodingModeMask) == DWARFMode;
   }
 
-  static void addFDEEdge(Symbol &Symbol, Block &B) {
-
+  static bool encodingCannotBeMerged(uint32_t Encoding) {
+    return false;
   }
 };
 
@@ -590,14 +591,32 @@ void link_MachO_arm64(std::unique_ptr<LinkGraph> G,
           return CompactUnwindMgr->splitAndParseCompactUnwindRecords(G);
         });
 
-    // Add eh-frame passes.
-    // FIXME: Prune eh-frames for which compact-unwind is available once
-    // we support compact-unwind registration with libunwind.
+    // Add eh-frame passses.
     Config.PrePrunePasses.push_back(createEHFrameSplitterPass_MachO_arm64());
-    Config.PrePrunePasses.push_back(createEHFrameEdgeFixerPass_MachO_arm64(CompactUnwindMgr));
+    Config.PrePrunePasses.push_back(createEHFrameEdgeFixerPass_MachO_arm64());
+
+    // Create a compact-unwind manager for use in passes below.
+    auto CompactUnwindMgr =
+      std::make_shared<CompactUnwindManager<CompactUnwindTraits_MachO_arm64>>(
+          "__LD,__compact_unwind", "__TEXT,__unwind_info", "__TEXT,__eh_frame");
+
+    // Add compact unwind prepare pass.
+    Config.PrePrunePasses.push_back([CompactUnwindMgr](LinkGraph &G) {
+      return CompactUnwindMgr->prepareForPrune(G);
+    });
 
     // Add an in-place GOT/Stubs pass.
     Config.PostPrunePasses.push_back(buildTables_MachO_arm64);
+
+    // Translate compact-unwind to unwind-info.
+    Config.PostPrunePasses.push_back([CompactUnwindMgr](LinkGraph &G) {
+      return CompactUnwindMgr->translateToUnwindInfo(G);
+    });
+
+    // Fix up unwind-info.
+    Config.PostAllocationPasses.push_back([CompactUnwindMgr](LinkGraph &G) {
+      return CompactUnwindMgr->applyFixups(G);
+    });
   }
 
   if (auto Err = Ctx->modifyPassConfig(*G, Config))
@@ -611,9 +630,8 @@ LinkGraphPassFunction createEHFrameSplitterPass_MachO_arm64() {
   return DWARFRecordSectionSplitter("__TEXT,__eh_frame");
 }
 
-LinkGraphPassFunction createEHFrameEdgeFixerPass_MachO_arm64(
-    std::shared_ptr<CompactUnwindManager> CompactUnwindMgr) {
-  return EHFrameEdgeFixer("__TEXT,__eh_frame", std::move(CompactUnwindMgr),
+LinkGraphPassFunction createEHFrameEdgeFixerPass_MachO_arm64() {
+  return EHFrameEdgeFixer("__TEXT,__eh_frame",
                           aarch64::PointerSize, aarch64::Pointer32,
                           aarch64::Pointer64, aarch64::Delta32,
                           aarch64::Delta64, aarch64::NegDelta32);

@@ -20,14 +20,12 @@ namespace llvm {
 namespace jitlink {
 
 EHFrameEdgeFixer::EHFrameEdgeFixer(StringRef EHFrameSectionName,
-                                   std::shared_ptr<CompactUnwindManager> CompactUnwindMgr,
                                    unsigned PointerSize, Edge::Kind Pointer32,
                                    Edge::Kind Pointer64, Edge::Kind Delta32,
                                    Edge::Kind Delta64, Edge::Kind NegDelta32)
-    : EHFrameSectionName(EHFrameSectionName),
-      CompactUnwindMgr(std::move(CompactUnwindMgr)),
-      PointerSize(PointerSize), Pointer32(Pointer32), Pointer64(Pointer64),
-      Delta32(Delta32), Delta64(Delta64), NegDelta32(NegDelta32) {}
+    : EHFrameSectionName(EHFrameSectionName), PointerSize(PointerSize),
+      Pointer32(Pointer32), Pointer64(Pointer64), Delta32(Delta32),
+      Delta64(Delta64), NegDelta32(NegDelta32) {}
 
 Error EHFrameEdgeFixer::operator()(LinkGraph &G) {
   auto *EHFrame = G.findSectionByName(EHFrameSectionName);
@@ -369,77 +367,35 @@ Error EHFrameEdgeFixer::processFDE(ParseContext &PC, Block &B,
     dbgs() << "        Processing PC-begin at "
            << (RecordAddress + RecordReader.getOffset()) << "\n";
   });
-
   if (auto PCBegin = getOrCreateEncodedPointerEdge(
-      PC, BlockEdges, CIEInfo->AddressEncoding, RecordReader, B,
-      RecordReader.getOffset(), "PC begin")) {
+          PC, BlockEdges, CIEInfo->AddressEncoding, RecordReader, B,
+          RecordReader.getOffset(), "PC begin")) {
     assert(*PCBegin && "PC-begin symbol not set");
     if ((*PCBegin)->isDefined()) {
-      // PCBegin is defined. If there's a compact-unwind manager attached we
-      // need to consult it before adding keep-alive edge(s).
-
-      std::optional<SmallVector<Block*>> CompactUnwindRecordsNeedingDwarf;
-      if (CompactUnwindMgr) {
-        if (auto Size = readEncodedSize(CIEInfo->AddressEncoding, RecordReader)) {
-
-          orc::ExecutorAddrRange PCRange((*PCBegin)->getAddress(),
-                                         (*PCBegin)->getAddress() + *Size);
-          LLVM_DEBUG({
-              dbgs() << "          Checking for compact-unwind covering "
-                     << PCRange << "\n";
-            });
-
-          CompactUnwindRecordsNeedingDwarf =
-            CompactUnwindMgr->findRecordsNeedingDwarf(PCRange);
-        } else
-          return Size.takeError();
-      } else {
-        LLVM_DEBUG({
-            dbgs() << "          No compact-unwind manager attached. Skipping "
-                      "size field\n";
-          });
-
-        // Skip over the PC range size field.
-        if (auto Err = skipEncodedPointer(CIEInfo->AddressEncoding, RecordReader))
-          return Err;
-      }
-
-      // If there's a compact-unwind manager attached we should read the size
-      // field.
-      if (CompactUnwindRecordsNeedingDwarf) {
-        // If any compact unwind records require this FDE then ask the
-        // CompactUnwindMgr to add the necessary edges.
-        if (!CompactUnwindRecordsNeedingDwarf->empty())
-          CompactUnwindMgr->addFDEEdgesToRecordsNeedingDwarf(
-              FDESymbol, *CompactUnwindRecordsNeedingDwarf);
-      } else {
-        // CompactUnwindRecordsNeedingDwarf is none, indicating no coverage or
-        // partial coverage by records not needing DWARF.
-        // Add a keep-alive edge from the FDE target to the FDE to ensure that the
-        // FDE is kept alive if its target is.
-        LLVM_DEBUG({
-            dbgs() << "        Adding keep-alive edge from target at "
-                   << (*PCBegin)->getBlock().getAddress() << " to FDE at "
-                   << RecordAddress << "\n";
-          });
-        (*PCBegin)->getBlock().addEdge(Edge::KeepAlive, 0, FDESymbol, 0);
-      }
+      // Add a keep-alive edge from the FDE target to the FDE to ensure that the
+      // FDE is kept alive if its target is.
+      LLVM_DEBUG({
+        dbgs() << "        Adding keep-alive edge from target at "
+               << (*PCBegin)->getBlock().getAddress() << " to FDE at "
+               << RecordAddress << "\n";
+      });
+      (*PCBegin)->getBlock().addEdge(Edge::KeepAlive, 0, FDESymbol, 0);
     } else {
       LLVM_DEBUG({
-          dbgs() << "        WARNING: Not adding keep-alive edge to FDE at "
-                 << RecordAddress << ", which points to "
-                 << ((*PCBegin)->isExternal() ? "external" : "absolute")
-                 << " symbol \"" << (*PCBegin)->getName()
-                 << "\" -- FDE must be kept alive manually or it will be "
-                 << "dead stripped.\n";
-        });
-
-      // Skip over the PC range size field.
-      if (auto Err = skipEncodedPointer(CIEInfo->AddressEncoding, RecordReader))
-        return Err;
+        dbgs() << "        WARNING: Not adding keep-alive edge to FDE at "
+               << RecordAddress << ", which points to "
+               << ((*PCBegin)->isExternal() ? "external" : "absolute")
+               << " symbol \"" << (*PCBegin)->getName()
+               << "\" -- FDE must be kept alive manually or it will be "
+               << "dead stripped.\n";
+      });
     }
   } else
     return PCBegin.takeError();
+
+  // Skip over the PC range size field.
+  if (auto Err = skipEncodedPointer(CIEInfo->AddressEncoding, RecordReader))
+    return Err;
 
   if (CIEInfo->AugmentationDataPresent) {
     uint64_t AugmentationDataSize;
@@ -563,43 +519,6 @@ Error EHFrameEdgeFixer::skipEncodedPointer(uint8_t PointerEncoding,
   return Error::success();
 }
 
-Expected<uint64_t> EHFrameEdgeFixer::readEncodedSize(
-    uint8_t PointerEncoding, BinaryStreamReader &RecordReader) {
-
-  using namespace dwarf;
-
-  if (PointerEncoding == DW_EH_PE_omit)
-    return 0;
-
-  // Switch absptr to corresponding udata encoding.
-  if ((PointerEncoding & 0xf) == DW_EH_PE_absptr)
-    PointerEncoding |= (PointerSize == 8) ? DW_EH_PE_udata8 : DW_EH_PE_udata4;
-
-  // We need to create an edge. Start by reading the field value.
-  switch (PointerEncoding & 0xf) {
-  case DW_EH_PE_udata4: {
-    uint32_t Val;
-    if (auto Err = RecordReader.readInteger(Val))
-      return std::move(Err);
-    return Val;
-  }
-  case DW_EH_PE_sdata4: {
-    int32_t Val;
-    if (auto Err = RecordReader.readInteger(Val))
-      return std::move(Err);
-    return Val;
-  }
-  case DW_EH_PE_udata8:
-  case DW_EH_PE_sdata8:
-    uint64_t Val;
-    if (auto Err = RecordReader.readInteger(Val))
-      return std::move(Err);
-    return Val;
-  default:
-    llvm_unreachable("Unsupported encoding");
-  }
-}
-
 Expected<Symbol *> EHFrameEdgeFixer::getOrCreateEncodedPointerEdge(
     ParseContext &PC, const BlockEdgeMap &BlockEdges, uint8_t PointerEncoding,
     BinaryStreamReader &RecordReader, Block &BlockToFix,
@@ -644,7 +563,7 @@ Expected<Symbol *> EHFrameEdgeFixer::getOrCreateEncodedPointerEdge(
     break;
   }
   case DW_EH_PE_sdata4: {
-    int32_t Val;
+    uint32_t Val;
     if (auto Err = RecordReader.readInteger(Val))
       return std::move(Err);
     FieldValue = Val;

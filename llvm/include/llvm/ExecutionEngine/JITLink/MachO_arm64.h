@@ -13,7 +13,6 @@
 #ifndef LLVM_EXECUTIONENGINE_JITLINK_MACHO_ARM64_H
 #define LLVM_EXECUTIONENGINE_JITLINK_MACHO_ARM64_H
 
-#include "llvm/ExecutionEngine/JITLink/CompactUnwindSupport.h"
 #include "llvm/ExecutionEngine/JITLink/JITLink.h"
 
 namespace llvm {
@@ -45,8 +44,7 @@ LinkGraphPassFunction createEHFrameSplitterPass_MachO_arm64();
 
 /// Returns a pass suitable for fixing missing edges in an __eh_frame section
 /// in a MachO/x86-64 object.
-LinkGraphPassFunction createEHFrameEdgeFixerPass_MachO_arm64(
-    std::shared_ptr<CompactUnwindManager> CompactUnwindMgr);
+LinkGraphPassFunction createEHFrameEdgeFixerPass_MachO_arm64();
 
 } // end namespace jitlink
 } // end namespace llvm

@@ -17,57 +17,6 @@
 namespace llvm {
 namespace jitlink {
 
-std::optional<SmallVector<Block*>>
-CompactUnwindManager::findRecordsNeedingDwarf(orc::ExecutorAddrRange R) {
-  auto CUItr = llvm::upper_bound(ParsedRecords, R.Start,
-                                 [](orc::ExecutorAddr Addr,
-                                    const CURecInfo &Rec) {
-                                   return Addr < Rec.CoveredRange.Start;
-                                 });
-
-  if (CUItr == ParsedRecords.begin())
-    return std::nullopt;
-
-  // CUItr points to the range with the highest start address less than or
-  // equal to R.Start.
-  CUItr = std::prev(CUItr);
-
-  // If CUItr ends before R starts then R must start in a gap and is not
-  // covered.
-  if (CUItr->CoveredRange.End <= R.Start)
-    return std::nullopt;
-
-  // Walk subsequent records to find all records that cover R.
-  bool ContainsGap = false;
-  CURecInfo *LastRec = nullptr;
-  SmallVector<Block*> RecordsNeedingDWARF;
-  for (; CUItr != ParsedRecords.end() && CUItr->CoveredRange.Start < R.End;
-       ++CUItr) {
-
-    // If we encounter a gap in the compact-unwind records or a record that
-    // needs the FDE then bail out early.
-    if (LastRec && LastRec->CoveredRange.End != CUItr->CoveredRange.Start)
-      ContainsGap = true;
-    LastRec = &*CUItr;
-
-    if (CUItr->NeedsDWARF)
-      RecordsNeedingDWARF.push_back(CUItr->RecBlock);
-  }
-
-  // Check that the last record in the list fully covers R.
-  if (std::prev(CUItr)->CoveredRange.End < R.End)
-    ContainsGap = true;
-
-  // If there were records needing DWARF, or if there were no records but
-  // the range was fully covered, then return the (potentially empty)
-  // RecordsNeedingDWARF set.
-  if (!RecordsNeedingDWARF.empty() || !ContainsGap)
-    return RecordsNeedingDWARF;
-
-  // RecordsNeedingDWARF was empty but there was a gap, so return 'None'.
-  return std::nullopt;
-}
-
 Error splitCompactUnwindBlocks(LinkGraph &G, Section &CompactUnwindSection,
                                size_t RecordSize) {
   LLVM_DEBUG({

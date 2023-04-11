@@ -18,8 +18,6 @@
 #include "llvm/ExecutionEngine/JITLink/JITLink.h"
 #include "llvm/Support/BinaryStreamReader.h"
 
-#include "CompactUnwindSupportImpl.h"
-
 namespace llvm {
 namespace jitlink {
 
@@ -32,13 +30,9 @@ public:
   /// Adds edges for implicit relocations on platforms where these are used
   /// (e.g. MachO/x86-64).
   ///
-  /// If a CompactUnwindInfoManager is provided then it will be used to identify
-  /// and discard FDEs that are superseded by compact-unwind blocks.
-  ///
   /// If a given edge-kind is not supported on the target architecture then
   /// Edge::Invalid should be used.
   EHFrameEdgeFixer(StringRef EHFrameSectionName,
-                   std::shared_ptr<CompactUnwindManager> CompactUnwindMgr,
                    unsigned PointerSize, Edge::Kind Pointer32,
                    Edge::Kind Pointer64, Edge::Kind Delta32,
                    Edge::Kind Delta64, Edge::Kind NegDelta32);
@@ -117,7 +111,6 @@ private:
                                        orc::ExecutorAddr Addr);
 
   StringRef EHFrameSectionName;
-  std::shared_ptr<CompactUnwindManager> CompactUnwindMgr;
   unsigned PointerSize;
   Edge::Kind Pointer32;
   Edge::Kind Pointer64;
