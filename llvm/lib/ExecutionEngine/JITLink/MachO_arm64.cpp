@@ -608,15 +608,20 @@ void link_MachO_arm64(std::unique_ptr<LinkGraph> G,
     // Add an in-place GOT/Stubs pass.
     Config.PostPrunePasses.push_back(buildTables_MachO_arm64);
 
-    // Translate compact-unwind to unwind-info.
-    Config.PostPrunePasses.push_back([CompactUnwindMgr](LinkGraph &G) {
-      return CompactUnwindMgr->translateToUnwindInfo(G);
-    });
+    // // Translate compact-unwind to unwind-info.
+    // Config.PostPrunePasses.push_back([CompactUnwindMgr](LinkGraph &G) {
+    //   return CompactUnwindMgr->translateToUnwindInfo(G);
+    // });
 
-    // Fix up unwind-info.
-    Config.PostAllocationPasses.push_back([CompactUnwindMgr](LinkGraph &G) {
-      return CompactUnwindMgr->applyFixups(G);
-    });
+    // // Reserve unwind-info space.
+    // Config.PostPrunePasses.push_back([CompactUnwindMgr](LinkGraph &G) {
+    //   return CompactUnwindMgr->reserveUnwindInfoBlock(G);
+    // });
+
+    // // Fix up unwind-info.
+    // Config.PostAllocationPasses.push_back([CompactUnwindMgr](LinkGraph &G) {
+    //   return CompactUnwindMgr->translateToUnwindInfo(G);
+    // });
   }
 
   if (auto Err = Ctx->modifyPassConfig(*G, Config))

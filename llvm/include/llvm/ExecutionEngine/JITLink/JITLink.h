@@ -334,6 +334,9 @@ public:
   /// Returns true if the list of edges is empty.
   bool edges_empty() const { return Edges.empty(); }
 
+  /// Remove all edges in this block.
+  void edges_clear() { Edges.clear(); }
+
   /// Remove the edge pointed to by the given iterator.
   /// Returns an iterator to the new next element.
   edge_iterator removeEdge(edge_iterator I) { return Edges.erase(I); }
@@ -689,7 +692,13 @@ void printEdge(raw_ostream &OS, const Block &B, const Edge &E,
 /// Returns true if both Symbols point to the same defined content
 /// (block and offset).
 /// Both symbols must be defined.
-inline bool sameDefinedTarget(const Symbol &S1, const Symbol &S2) {
+///
+/// Note: This is called sameDefinedLocation rather than sameAddress to
+///       (1) that it's an operation on defined symbols only, and (2) that
+///       different blocks with overlapping addresses (currently permitted as
+///       an intermediate state prior to layout) have distinct "defined
+///       locations".
+inline bool sameDefinedLocation(const Symbol &S1, const Symbol &S2) {
   assert(S1.isDefined() && "S1 is not a defined symbol");
   assert(S2.isDefined() && "S2 is not a defined symbol");
   return &S1.getBlock() == &S2.getBlock() && S1.getOffset() == S2.getOffset();
@@ -1301,7 +1310,16 @@ public:
                                  GetExternalSymbolMapEntryValue()));
   }
 
-  iterator_range<absolute_symbol_iterator> absolute_symbols() {
+  /// Returns the external symbol with the given name if it exists, otherwise
+  /// returns null.
+  Symbol *findExternalSymbolByName(StringRef Name) {
+    for (auto *Sym : external_symbols())
+      if (Sym->getName() == Name)
+        return Sym;
+    return nullptr;
+  }
+
+  iterator_range<external_symbol_iterator> absolute_symbols() {
     return make_range(AbsoluteSymbols.begin(), AbsoluteSymbols.end());
   }
 

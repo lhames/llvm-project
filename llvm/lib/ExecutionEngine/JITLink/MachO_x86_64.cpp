@@ -529,9 +529,14 @@ void link_MachO_x86_64(std::unique_ptr<LinkGraph> G,
       return CompactUnwindMgr->translateToUnwindInfo(G);
     });
 
+    // Reserve space for unwind-info.
+    Config.PostPrunePasses.push_back([CompactUnwindMgr](LinkGraph &G) {
+      return CompactUnwindMgr->reserveUnwindInfoBlock(G);
+    });
+
     // Fix up unwind-info.
     Config.PostAllocationPasses.push_back([CompactUnwindMgr](LinkGraph &G) {
-      return CompactUnwindMgr->applyFixups(G);
+      return CompactUnwindMgr->translateToUnwindInfo(G);
     });
 
     // Add GOT/Stubs optimizer pass.

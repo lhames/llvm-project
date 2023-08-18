@@ -13,6 +13,7 @@
 #ifndef LIB_EXECUTIONENGINE_JITLINK_COMPACTUNWINDSUPPORTIMPL_H
 #define LIB_EXECUTIONENGINE_JITLINK_COMPACTUNWINDSUPPORTIMPL_H
 
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ExecutionEngine/JITLink/CompactUnwindSupport.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/Endian.h"
@@ -55,13 +56,22 @@ template <typename CURecTraits>
 class CompactUnwindManager {
 private:
 
-    struct UnwindEntry {
-      Symbol *Fn = nullptr;
-      Symbol *FDE = nullptr;
-      Symbol *LSDA = nullptr;
-      Symbol *Personality = nullptr;
-      uint32_t Encoding = 0;
-    };
+  struct UnwindEntry {
+    Symbol *Fn = nullptr;
+    uint32_t Size = 0;
+    uint32_t Encoding = 0;
+    Symbol *LSDA = nullptr;
+    Symbol *FDE = nullptr;
+  };
+
+  static constexpr uint32_t UNWIND_IS_NOT_FUNCTION_START = 0x80000000;
+  static constexpr uint32_t UNWIND_HAS_LSDA              = 0x40000000;
+  static constexpr uint32_t UNWIND_PERSONALITY_MASK      = 0x30000000;
+
+  static constexpr size_t MaxPersonalities = 4;
+  static constexpr size_t PersonalityShift = 28;
+
+  static constexpr size_t UnwindInfoSectionHeaderSize = 4 * 7;
 
 public:
 
@@ -140,7 +150,6 @@ public:
           });
       }
 
-      auto PCRangeSize = CURecTraits::readPCRangeSize(B->getContent());
       bool NeedsDWARF =
         CURecTraits::encodingSpecifiesDWARF(
             CURecTraits::readEncoding(B->getContent()));
@@ -198,40 +207,144 @@ public:
     return Error::success();
   }
 
+  /// This must be called prior to graph allocation. It reserves space for the
+  /// unwind info block, and marks the compact unwind section as no-alloc.
+  Error reserveUnwindInfoBlock(LinkGraph &G) {
+    // Bail out early if no unwind info.
+    Section *CUSec = G.findSectionByName(CompactUnwindSectionName);
+    if (!CUSec)
+      return Error::success();
+
+    CUSec->setMemLifetimePolicy(orc::MemLifetimePolicy::NoAlloc);
+
+    // Error out if there's already unwind-info in the graph: We have no idea
+    // how to merge more.
+    if (G.findSectionByName(UnwindInfoSectionName))
+      return make_error<JITLinkError>("In " + G.getName() + ", " +
+                                      UnwindInfoSectionName +
+                                      " already exists");
+
+    // Find the JITDylib base address so that we can calculate the offsets.
+    DSOHandle = G.findExternalSymbolByName("___dso_handle");
+    if (!DSOHandle)
+      DSOHandle = &G.addExternalSymbol("___dso_handle", 0, false);
+
+    // Count the number of LSDAs.
+    size_t NumLSDAs = 0;
+    for (auto *B : CUSec->blocks()) {
+      for (auto &E : B->edges())
+        if (E.getOffset() == CURecTraits::LSDAFieldOffset)
+          ++NumLSDAs;
+    }
+
+    // Calculate the size of unwind-info.
+    size_t NumEntries = CUSec->blocks_size();
+    size_t NumSecondLevelPages = numSecondLevelPagesRequired(NumEntries);
+
+    size_t UnwindInfoSectionSize =
+      UnwindInfoSectionHeaderSize + // size of unwind info section header.
+      MaxPersonalities * PersonalityEntrySize + // max number of personalities.
+      NumSecondLevelPages * IndexEntrySize + // index array size.
+      NumSecondLevelPages * SecondLevelPageHeaderSize + // 2nd level page hdrs.
+      NumEntries * SecondLevelPageEntrySize + // 2nd level page entries.
+      NumLSDAs * LSDAEntrySize; // LSDA entries.
+
+    LLVM_DEBUG({
+      dbgs() << "In " << G.getName() << ", reserving "
+             << formatv("{0:x}", UnwindInfoSectionSize)
+             << " bytes for " << UnwindInfoSectionName << "\n";
+    });
+
+    // Create the unwind-info section and reserve space for it.
+    Section &UnwindInfoSec =
+      G.createSection(UnwindInfoSectionName, orc::MemProt::Read);
+
+    auto UnwindInfoSectionContent = G.allocateBuffer(UnwindInfoSectionSize);
+    memset(UnwindInfoSectionContent.data(), 0, UnwindInfoSectionContent.size());
+    G.createMutableContentBlock(UnwindInfoSec, UnwindInfoSectionContent,
+                                orc::ExecutorAddr(), 8, 0);
+    return Error::success();
+  }
+
   Error translateToUnwindInfo(LinkGraph &G) {
     Section *CUSec = G.findSectionByName(CompactUnwindSectionName);
     if (!CUSec)
       return Error::success();
 
-    if (G.findSectionByName(UnwindInfoSectionName))
+    Section *UnwindInfoSec = G.findSectionByName(UnwindInfoSectionName);
+    if (!UnwindInfoSec)
       return make_error<JITLinkError>("In " + G.getName() + ", " +
                                       UnwindInfoSectionName +
-                                      " already exists");
-    Section &UnwindInfoSec =
-      G.createSection(UnwindInfoSectionName, orc::MemProt::Read);
+                                      " missing after allocation");
 
-    Section *EHFrameSec = G.findSectionByName(EHFrameSectionName);
+    if (UnwindInfoSec->blocks_size() != 1)
+      return make_error<JITLinkError>(
+          "In " + G.getName() + ", " + UnwindInfoSectionName +
+          " contains more than one block post-allocation");
 
-    SmallVector<Symbol*, 4> Personalities;
+    SmallVector<Symbol*, MaxPersonalities> Personalities;
     SmallVector<UnwindEntry> Entries;
+    if (auto Err = prepareEntries(Entries, Personalities, G, *CUSec))
+      return Err;
 
-    for (auto *B : CUSec->blocks()) {
+    return writeUnwindInfo(Entries, Personalities, G, *UnwindInfoSec, *CUSec);
+  }
 
+private:
+
+  // Calculate the size of unwind-info.
+  static constexpr size_t PersonalityEntrySize = 4;
+  static constexpr size_t IndexEntrySize = 3 * 4;
+  static constexpr size_t LSDAEntrySize = 2 * 4;
+  static constexpr size_t SecondLevelPageSize = 4096;
+  static constexpr size_t SecondLevelPageHeaderSize = 8;
+  static constexpr size_t SecondLevelPageEntrySize = 8;
+  static constexpr size_t NumFunctionsPerSecondLevelPage =
+    (SecondLevelPageSize - SecondLevelPageHeaderSize) /
+    SecondLevelPageEntrySize;
+
+  size_t numSecondLevelPagesRequired(size_t NumEntries) {
+    return (NumEntries + NumFunctionsPerSecondLevelPage - 1) /
+      NumFunctionsPerSecondLevelPage;
+  }
+
+  Error prepareEntries(SmallVectorImpl<UnwindEntry> &Entries,
+                       SmallVectorImpl<Symbol*> &Personalities,
+                       LinkGraph &G, Section &CUSec) {
+
+    // Loop over compact unwind blocks to find the list of entries.
+    SmallVector<UnwindEntry> NonUniqued;
+    NonUniqued.reserve(CUSec.blocks_size());
+
+    for (auto *B : CUSec.blocks()) {
       UnwindEntry Entry;
 
       for (auto &E : B->edges()) {
         switch (E.getOffset()) {
         case CURecTraits::FnFieldOffset:
-          Entry.Fn = &E.getTarget();
-          break;
-        case CURecTraits::EncodingFieldOffset:
-          Entry.FDE = &E.getTarget();
+          // This could be the function-pointer, or the FDE keep-alive. Check
+          // the type to decide.
+          if (E.getKind() == Edge::KeepAlive)
+            Entry.FDE = &E.getTarget();
+          else
+            Entry.Fn = &E.getTarget();
           break;
         case CURecTraits::PersonalityFieldOffset: {
-          Entry.Personality = &E.getTarget();
-          auto I = llvm::find(Personalities, Entry.Personality);
-          if (I == Personalities.end())
-            Personalities.push_back(Entry.Personality);
+          // Add the Personality to the Personalities map and update the
+          // encoding.
+          size_t PersonalityIdx = 0;
+          for (; PersonalityIdx != Personalities.size(); ++PersonalityIdx)
+            if (Personalities[PersonalityIdx] == &E.getTarget())
+              break;
+          if (PersonalityIdx == MaxPersonalities)
+            return make_error<JITLinkError>(
+                "In " + G.getName() +
+                ", __compact_unwind contains too many personalities (max "
+                + formatv("{}", MaxPersonalities) + ")");
+          if (PersonalityIdx == Personalities.size())
+            Personalities.push_back(&E.getTarget());
+
+          Entry.Encoding |= PersonalityIdx << PersonalityShift;
           break;
         }
         case CURecTraits::LSDAFieldOffset:
@@ -246,35 +359,17 @@ public:
         }
       }
 
-      Entries.push_back(Entry);
+      NonUniqued.push_back(Entry);
     }
 
-    if (Personalities.size() > 3)
-      return make_error<JITLinkError>(
-          "In " + G.getName() + ", " + CompactUnwindSectionName +
-          " contains " + Twine(Personalities.size()) +
-          " encodings (maximum 4)");
-
+    // Sort and unique the entries.
     llvm::sort(Entries, [](const UnwindEntry &LHS, const UnwindEntry &RHS) {
       return LHS.Fn->getAddress() < RHS.Fn->getAddress();
     });
 
-    Entries = removeDuplicates(std::move(Entries));
-
-    
-    return Error::success();
-  }
-
-  Error applyFixups(LinkGraph &G) {
-    return Error::success();
-  };
-
-private:
-
-  SmallVector<UnwindEntry> removeDuplicates(SmallVector<UnwindEntry> Entries) {
-    assert(!Entries.empty() && "Entries list must be non-empty");
-    LLVM_DEBUG(dbgs() << "  Removing duplicate entries...\n");
     SmallVector<UnwindEntry> Uniqued;
+    Uniqued.reserve(NonUniqued.size());
+
     Uniqued.push_back(Entries.front());
     for (size_t I = 1; I != Entries.size(); ++I) {
       auto &Next = Entries[I];
@@ -283,22 +378,131 @@ private:
       bool NextNeedsDWARF = CURecTraits::encodingSpecifiesDWARF(Next.Encoding);
       bool CannotBeMerged = CURecTraits::encodingCannotBeMerged(Next.Encoding);
       if (NextNeedsDWARF || (Next.Encoding != Last.Encoding) ||
-          (Next.Personality != Last.Personality) || CannotBeMerged ||
-          Next.LSDA || Last.LSDA)
+          CannotBeMerged || Next.LSDA || Last.LSDA)
         Uniqued.push_back(Next);
     }
 
     LLVM_DEBUG({
-      dbgs() << "    Removed " << (Entries.size() - Uniqued.size())
-             << " duplicate entries.\n";
+      dbgs() << "    Adding " << Uniqued.size()
+             << " unwind info entries (removed "
+             << (Entries.size() - Uniqued.size()) << " duplicates)\n";
     });
 
-    return Uniqued;
+    return Error::success();
   }
+
+  Error makePersonalityRangeError(LinkGraph &G, Section &Sec, Symbol &PSym) {
+    std::string ErrMsg;
+    {
+      raw_string_ostream ErrStream(ErrMsg);
+      ErrStream << "In " << G.getName() << " " << Sec.getName()
+                << ", personality ";
+      if (PSym.hasName())
+        ErrStream << PSym.getName() << " ";
+      ErrStream << "at " << PSym.getAddress()
+                << " is out of 32-bit delta range from __dso_handle at "
+                << DSOHandle->getAddress();
+    }
+    return make_error<JITLinkError>(std::move(ErrMsg));
+  }
+
+  Error writeUnwindInfo(SmallVectorImpl<UnwindEntry> &Entries,
+                        SmallVectorImpl<Symbol*> &Personalities,
+                        LinkGraph &G, Section &UnwindInfoSec, Section &CUSec) {
+
+    auto Content = (*UnwindInfoSec.blocks().begin())->getMutableContent(G);
+    BinaryStreamWriter Writer({ reinterpret_cast<uint8_t*>(Content.data()),
+        Content.size() }, CURecTraits::Endianness);
+
+    // unwind_info_section_header from
+    // /usr/include/mach-o/compact_unwind_encoding.h:
+    struct unwind_info_section_header {
+      uint32_t    version;
+      uint32_t    commonEncodingsArraySectionOffset;
+      uint32_t    commonEncodingsArrayCount;
+      uint32_t    personalityArraySectionOffset;
+      uint32_t    personalityArrayCount;
+      uint32_t    indexSectionOffset;
+      uint32_t    indexCount;
+      // compact_unwind_encoding_t[]
+      // uint32_t personalities[]
+      // unwind_info_section_header_index_entry[]
+      // unwind_info_section_header_lsda_index_entry[]
+    };
+
+    uint32_t NumPersonalities = Personalities.size();
+    auto NumIndexEntries = numSecondLevelPagesRequired(Entries.size());
+    if (!isUInt<32>(NumIndexEntries))
+      return make_error<JITLinkError>(
+        "In " + G.getName() + " " + UnwindInfoSec.getName() +
+        " too many 2nd level page entries (>2^32)");
+
+    unwind_info_section_header Hdr = {
+      .version = 1,
+      .commonEncodingsArraySectionOffset = sizeof(Hdr),
+      .commonEncodingsArrayCount = 0,
+      .personalityArraySectionOffset = sizeof(Hdr),
+      .personalityArrayCount = NumPersonalities,
+      .indexSectionOffset =
+          static_cast<uint32_t>(
+              sizeof(Hdr) + NumPersonalities * PersonalityEntrySize),
+      .indexCount = static_cast<uint32_t>(NumIndexEntries)
+    };
+
+    // Write __unwind_info header.
+    cantFail(Writer.writeInteger(Hdr.version));
+    cantFail(Writer.writeInteger(Hdr.commonEncodingsArraySectionOffset));
+    cantFail(Writer.writeInteger(Hdr.commonEncodingsArrayCount));
+    cantFail(Writer.writeInteger(Hdr.personalityArraySectionOffset));
+    cantFail(Writer.writeInteger(Hdr.personalityArrayCount));
+    cantFail(Writer.writeInteger(Hdr.indexSectionOffset));
+    cantFail(Writer.writeInteger(Hdr.indexCount));
+
+    // Skip common encodings: JITLink doesn't use them yet.
+
+    // Write personalities.
+    for (auto *PSym : Personalities) {
+      auto Delta = PSym->getAddress() - DSOHandle->getAddress();
+      if (!isUInt<32>(Delta))
+        return makePersonalityRangeError(G, UnwindInfoSec, *PSym);
+      cantFail(Writer.writeInteger<uint32_t>(Delta));
+    }
+
+    // Calculate the offset to the LSDAs.
+    size_t SectionOffsetToLSDAs =
+      Writer.getOffset() + NumIndexEntries * IndexEntrySize;
+
+    // Count the LSDAs.
+    size_t NumLSDAs = 0;
+    for (auto &Entry : Entries)
+      if (Entry.LSDA)
+        ++NumLSDAs;
+
+    // Find the offset to the 1st second-level page.
+    size_t SectionOffsetToNextSecondLevelPage =
+      SectionOffsetToLSDAs + NumLSDAs * LSDAEntrySize;
+
+    size_t NextLSDAIdx = 0;
+    for (size_t I = 0; I != NumIndexEntries; ++I) {
+      auto FnAddr =
+        Entries[I * NumFunctionsPerSecondLevelPage].Fn->getAddress();
+      auto FnDelta = FnAddr - DSOHandle->getAddress();
+      cantFail(Writer.writeInteger<uint32_t>(FnDelta));
+      auto PageDelta =
+        SectionOffsetToNextSecondLevelPage + I * SecondLevelPageSize;
+      cantFail(Writer.writeInteger<uint32_t>(PageDelta));
+
+      
+    }
+
+    return Error::success();
+  }
+
 
   StringRef CompactUnwindSectionName;
   StringRef UnwindInfoSectionName;
   StringRef EHFrameSectionName;
+  Symbol *DSOHandle;
 };
 
 } // end namespace jitlink
