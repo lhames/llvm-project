@@ -19,45 +19,52 @@ ThreadSafeModule cloneToNewContext(const ThreadSafeModule &TSM,
                                    GVPredicate ShouldCloneDef,
                                    GVModifier UpdateClonedDefSource) {
   assert(TSM && "Can not clone null module");
+  return TSM.withModuleDo([&](Module &M) {
+    return cloneToNewContext(M, std::move(ShouldCloneDef),
+			     std::move(UpdateClonedDefSource));
+  });
+}
+
+ThreadSafeModule
+cloneToNewContext(Module &M, GVPredicate ShouldCloneDef,
+		  GVModifier UpdateClonedDefSource) {
 
   if (!ShouldCloneDef)
     ShouldCloneDef = [](const GlobalValue &) { return true; };
+    
+  SmallVector<char, 1> ClonedModuleBuffer;
 
-  return TSM.withModuleDo([&](Module &M) {
-    SmallVector<char, 1> ClonedModuleBuffer;
+  {
+    std::set<GlobalValue *> ClonedDefsInSrc;
+    ValueToValueMapTy VMap;
+    auto Tmp = CloneModule(M, VMap, [&](const GlobalValue *GV) {
+      if (ShouldCloneDef(*GV)) {
+	ClonedDefsInSrc.insert(const_cast<GlobalValue *>(GV));
+	return true;
+      }
+      return false;
+    });
+    
+    if (UpdateClonedDefSource)
+      for (auto *GV : ClonedDefsInSrc)
+	UpdateClonedDefSource(*GV);
 
-    {
-      std::set<GlobalValue *> ClonedDefsInSrc;
-      ValueToValueMapTy VMap;
-      auto Tmp = CloneModule(M, VMap, [&](const GlobalValue *GV) {
-        if (ShouldCloneDef(*GV)) {
-          ClonedDefsInSrc.insert(const_cast<GlobalValue *>(GV));
-          return true;
-        }
-        return false;
-      });
+    BitcodeWriter BCWriter(ClonedModuleBuffer);
 
-      if (UpdateClonedDefSource)
-        for (auto *GV : ClonedDefsInSrc)
-          UpdateClonedDefSource(*GV);
+    BCWriter.writeModule(*Tmp);
+    BCWriter.writeSymtab();
+    BCWriter.writeStrtab();
+  }
 
-      BitcodeWriter BCWriter(ClonedModuleBuffer);
+  MemoryBufferRef ClonedModuleBufferRef(
+      StringRef(ClonedModuleBuffer.data(), ClonedModuleBuffer.size()),
+      "cloned module buffer");
+  ThreadSafeContext NewTSCtx(std::make_unique<LLVMContext>());
 
-      BCWriter.writeModule(*Tmp);
-      BCWriter.writeSymtab();
-      BCWriter.writeStrtab();
-    }
-
-    MemoryBufferRef ClonedModuleBufferRef(
-        StringRef(ClonedModuleBuffer.data(), ClonedModuleBuffer.size()),
-        "cloned module buffer");
-    ThreadSafeContext NewTSCtx(std::make_unique<LLVMContext>());
-
-    auto ClonedModule = cantFail(
-        parseBitcodeFile(ClonedModuleBufferRef, *NewTSCtx.getContext()));
-    ClonedModule->setModuleIdentifier(M.getName());
-    return ThreadSafeModule(std::move(ClonedModule), std::move(NewTSCtx));
-  });
+  auto ClonedModule = cantFail(
+      parseBitcodeFile(ClonedModuleBufferRef, *NewTSCtx.getContext()));
+  ClonedModule->setModuleIdentifier(M.getName());
+  return ThreadSafeModule(std::move(ClonedModule), std::move(NewTSCtx));
 }
 
 } // end namespace orc

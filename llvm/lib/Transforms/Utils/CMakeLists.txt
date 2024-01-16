@@ -61,6 +61,7 @@ add_llvm_component_library(LLVMTransformUtils
   MisExpect.cpp
   ModuleUtils.cpp
   MoveAutoInit.cpp
+  MyJITPass.cpp
   NameAnonGlobals.cpp
   PredicateInfo.cpp
   PromoteMemoryToRegister.cpp
@@ -96,6 +97,8 @@ add_llvm_component_library(LLVMTransformUtils
   LINK_COMPONENTS
   Analysis
   Core
+  OrcJIT
+  OrcTargetProcess
   Support
   TargetParser
   )

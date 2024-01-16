@@ -175,6 +175,13 @@ cloneToNewContext(const ThreadSafeModule &TSMW,
                   GVPredicate ShouldCloneDef = GVPredicate(),
                   GVModifier UpdateClonedDefSource = GVModifier());
 
+/// Clones the given module on to a new context. This overload should only be
+/// used if the caller knows that the given Module will not be concurrently
+/// accessed during the clone.
+ThreadSafeModule
+cloneToNewContext(Module &M, GVPredicate ShouldCloneDef = GVPredicate(),
+		  GVModifier UpdateClonedDefSource = GVModifier());
+
 } // End namespace orc
 } // End namespace llvm
 
