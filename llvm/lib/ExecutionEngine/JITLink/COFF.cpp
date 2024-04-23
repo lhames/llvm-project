@@ -14,7 +14,11 @@
 
 #include "llvm/BinaryFormat/COFF.h"
 #include "llvm/ExecutionEngine/JITLink/COFF_x86_64.h"
+#include "llvm/ExecutionEngine/JITLink/COFF_arm64.h"
 #include "llvm/Object/COFF.h"
+#include "llvm/Support/Format.h"
+#include "llvm/Support/MemoryBuffer.h"
+#include "llvm/TargetParser/Triple.h"
 #include <cstring>
 
 using namespace llvm;
@@ -110,6 +114,8 @@ createLinkGraphFromCOFFObject(MemoryBufferRef ObjectBuffer,
   switch (Machine) {
   case COFF::IMAGE_FILE_MACHINE_AMD64:
     return createLinkGraphFromCOFFObject_x86_64(ObjectBuffer, std::move(SSP));
+  case COFF::IMAGE_FILE_MACHINE_ARM64:
+    return createLinkGraphFromCOFFObject_arm64(ObjectBuffer, std::move(SSP));
   default:
     return make_error<JITLinkError>(
         "Unsupported target machine architecture in COFF object " +
@@ -122,6 +128,9 @@ void link_COFF(std::unique_ptr<LinkGraph> G,
   switch (G->getTargetTriple().getArch()) {
   case Triple::x86_64:
     link_COFF_x86_64(std::move(G), std::move(Ctx));
+    return;
+  case Triple::aarch64:
+    link_COFF_arm64(std::move(G), std::move(Ctx));
     return;
   default:
     Ctx->notifyFailed(make_error<JITLinkError>(
