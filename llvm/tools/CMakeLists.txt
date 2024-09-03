@@ -40,6 +40,7 @@ add_llvm_tool_subdirectory(llvm-profdata)
 # specified.
 add_llvm_external_project(lld)
 add_llvm_external_project(mlir)
+add_llvm_external_project(orc-rt)
 # ClangIR and Flang depend on mlir, lldb and Flang depend on clang, sort them
 # accordingly so place them afterwards
 add_llvm_external_project(clang)
