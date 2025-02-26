@@ -65,6 +65,23 @@ public:
        SymbolPredicate Allow = SymbolPredicate(),
        AddAbsoluteSymbolsFn AddAbsoluteSymbols = nullptr);
 
+  /// Permanently loads the library at the given path and, on succes returns
+  /// an EPCDynamicLibrarySearchGenerator that will search it for symbol
+  /// definitions in the library (the same as Load). On failure to load the
+  /// library this method will return an EPCDynamicLibrarySearchGenerator that
+  /// will resolve any symbol that matches the Allow predicate to null
+  /// (emulating the behavior of ld64's -weak_library / -weak-lx options).
+  ///
+  /// WARNING: This method currently interprets _any_ error while loading the
+  ///          library as an absent library. This will result in incorrect
+  ///          behavior if the error is due to some other reason (e.g. an
+  ///          IPC / RPC failure).
+  /// TODO: Fix the above. This will require teaching SimplePackedSerialization
+  ///       how to deal with different error types.
+  static Expected<std::unique_ptr<EPCDynamicLibrarySearchGenerator>>
+  LoadWeak(ExecutionSession &ES, const char *LibraryPath, SymbolPredicate Allow,
+           AddAbsoluteSymbolsFn AddAbsoluteSymbols = nullptr);
+
   /// Creates a EPCDynamicLibrarySearchGenerator that searches for symbols in
   /// the target process.
   static Expected<std::unique_ptr<EPCDynamicLibrarySearchGenerator>>

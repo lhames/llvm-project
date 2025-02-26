@@ -30,6 +30,23 @@ EPCDynamicLibrarySearchGenerator::Load(
       ES, *Handle, std::move(Allow), std::move(AddAbsoluteSymbols));
 }
 
+Expected<std::unique_ptr<EPCDynamicLibrarySearchGenerator>>
+EPCDynamicLibrarySearchGenerator::LoadWeak(
+    ExecutionSession &ES, const char *LibraryPath, SymbolPredicate Allow,
+    AddAbsoluteSymbolsFn AddAbsoluteSymbols) {
+  auto Handle =
+      ES.getExecutorProcessControl().getDylibMgr().loadDylib(LibraryPath);
+
+  if (Handle)
+    return std::make_unique<EPCDynamicLibrarySearchGenerator>(
+        ES, *Handle, std::move(Allow), std::move(AddAbsoluteSymbols));
+  else {
+    consumeError(Handle.takeError());
+    return std::make_unique<EPCDynamicLibrarySearchGenerator>(
+        ES, std::move(Allow), std::move(AddAbsoluteSymbols));
+  }
+}
+
 Error EPCDynamicLibrarySearchGenerator::tryToGenerate(
     LookupState &LS, LookupKind K, JITDylib &JD,
     JITDylibLookupFlags JDLookupFlags, const SymbolLookupSet &Symbols) {
