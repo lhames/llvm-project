@@ -43,10 +43,14 @@ struct jit_descriptor {
 };
 }
 
-extern "C" LLVM_ABI llvm::orc::shared::CWrapperFunctionResult
-llvm_orc_registerJITLoaderGDBWrapper(const char *ArgData, size_t ArgSize);
+extern "C" void
+llvm_orc_registerJITLoaderGDBAllocAction(const char *Data, size_t Size,
+                                         void *SessionCtx, uintptr_t MsgCtx,
+                                         llvm::orc::shared::CYieldFn Yield);
 
-extern "C" LLVM_ABI llvm::orc::shared::CWrapperFunctionResult
-llvm_orc_registerJITLoaderGDBAllocAction(const char *ArgData, size_t ArgSize);
+extern "C" LLVM_ABI void
+llvm_orc_registerJITLoaderGDBWrapper(const char *Data, size_t Size,
+                                     void *SessionCtx, uintptr_t MsgCtx,
+                                     llvm::orc::shared::CYieldFn Yield);
 
 #endif // LLVM_EXECUTIONENGINE_ORC_TARGETPROCESS_JITLOADERGDB_H

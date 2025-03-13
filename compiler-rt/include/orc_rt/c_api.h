@@ -197,6 +197,19 @@ static inline const char *orc_rt_WrapperFunctionResultGetOutOfBandError(
   return R->Size == 0 ? R->Data.ValuePtr : 0;
 }
 
+/**
+ * Used to send results from async wrappers (see below).
+ */
+typedef void (*orc_rt_YieldFn)(void *SessionCtx, uintptr_t MsgCtx,
+                               orc_rt_WrapperFunctionResult R);
+
+/**
+ * Functions of this type can be used as handlers via EPC.
+ */
+typedef void (*orc_rt_WrapperFn)(const char *ArgData, size_t ArgSize,
+                                 void *SessionCtx, uintptr_t MsgCtx,
+                                 orc_rt_YieldFn Yield);
+
 ORC_RT_C_EXTERN_C_END
 
 #endif /* ORC_RT_C_API_H */

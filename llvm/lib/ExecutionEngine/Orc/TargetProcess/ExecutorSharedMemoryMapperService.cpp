@@ -188,7 +188,8 @@ Expected<ExecutorAddr> ExecutorSharedMemoryMapperService::initialize(
     std::promise<MSVCPExpected<std::vector<shared::WrapperFunctionCall>>> P;
     auto F = P.get_future();
     shared::runFinalizeActions(
-        FR.Actions, [&](Expected<std::vector<shared::WrapperFunctionCall>> R) {
+        std::move(FR.Actions),
+        [&](Expected<std::vector<shared::WrapperFunctionCall>> R) {
           P.set_value(std::move(R));
         });
     if (auto DeinitializeActionsOrErr = F.get())
@@ -213,97 +214,72 @@ Expected<ExecutorAddr> ExecutorSharedMemoryMapperService::initialize(
 #endif
 }
 
-Error ExecutorSharedMemoryMapperService::deinitialize(
+void ExecutorSharedMemoryMapperService::deinitialize(
+    unique_function<void(Error)> OnComplete,
     const std::vector<ExecutorAddr> &Bases) {
-  Error AllErr = Error::success();
 
-  {
+  if (Bases.empty())
+    return OnComplete(Error::success());
+
+  std::vector<std::pair<void *, Allocation>> AllocPairs;
+
+  Reservation *R = nullptr;
+  for (auto &[RBase, REntry] : Reservations) {
+    if (ExecutorAddrRange::fromPtrRange(RBase, REntry.Size)
+            .contains(Bases.front())) {
+      R = &REntry;
+      break;
+    }
+  }
+
+  Error Err = Error::success();
+  if (R) {
     std::lock_guard<std::mutex> Lock(Mutex);
 
-    for (auto Base : llvm::reverse(Bases)) {
-      shared::runDeallocActions(
-          Allocations[Base].DeinitializationActions, [&](Error Err) {
-            if (Err)
-              AllErr = joinErrors(std::move(AllErr), std::move(Err));
-          });
+    for (auto Base : Bases) {
+      auto I = Allocations.find(Base);
 
-      // Remove the allocation from the allocation list of its reservation
-      for (auto &Reservation : Reservations) {
-        auto AllocationIt = llvm::find(Reservation.second.Allocations, Base);
-        if (AllocationIt != Reservation.second.Allocations.end()) {
-          Reservation.second.Allocations.erase(AllocationIt);
-          break;
-        }
+      {
+        auto J = llvm::find(R->Allocations, Base);
+        if (J != R->Allocations.end())
+          R->Allocations.erase(J);
+        else
+          Err = joinErrors(std::move(Err),
+                           make_error<StringError>(
+                               "Reservation does not contain an entry for " +
+                                   formatv("{0:x}", Base.getValue()),
+                               inconvertibleErrorCode()));
       }
 
-      Allocations.erase(Base);
+      if (I != Allocations.end()) {
+        AllocPairs.push_back(
+            std::make_pair(Base.toPtr<void *>(), std::move(I->second)));
+        Allocations.erase(I);
+      } else
+        Err = joinErrors(
+            std::move(Err),
+            make_error<StringError>("No allocation entry found for " +
+                                        formatv("{0:x}", Base.getValue()),
+                                    inconvertibleErrorCode()));
     }
-  }
+  } else
+    Err = joinErrors(
+        std::move(Err),
+        make_error<StringError>("No reservation found covering " +
+                                    formatv("{0:x}", Bases.front().getValue()),
+                                inconvertibleErrorCode()));
 
-  return AllErr;
+  deinitializeSeq(std::move(OnComplete), std::move(AllocPairs), std::move(Err));
 }
 
-Error ExecutorSharedMemoryMapperService::release(
-    const std::vector<ExecutorAddr> &Bases) {
+void ExecutorSharedMemoryMapperService::release(
+    unique_function<void(Error)> OnComplete, std::vector<ExecutorAddr> Bases) {
 #if (defined(LLVM_ON_UNIX) && !defined(__ANDROID__)) || defined(_WIN32)
-  Error Err = Error::success();
-
-  for (auto Base : Bases) {
-    std::vector<ExecutorAddr> AllocAddrs;
-    size_t Size;
-
-#if defined(_WIN32)
-    HANDLE SharedMemoryFile;
-#endif
-
-    {
-      std::lock_guard<std::mutex> Lock(Mutex);
-      auto &R = Reservations[Base.toPtr<void *>()];
-      Size = R.Size;
-
-#if defined(_WIN32)
-      SharedMemoryFile = R.SharedMemoryFile;
-#endif
-
-      AllocAddrs.swap(R.Allocations);
-    }
-
-    // deinitialize sub allocations
-    if (Error E = deinitialize(AllocAddrs))
-      Err = joinErrors(std::move(Err), std::move(E));
-
-#if defined(LLVM_ON_UNIX)
-
-#if defined(__MVS__)
-    (void)Size;
-
-    if (shmdt(Base.toPtr<void *>()) < 0)
-      Err = joinErrors(std::move(Err), errorCodeToError(errnoAsErrorCode()));
+  releaseSeq(std::move(OnComplete), std::move(Bases), Error::success());
 #else
-    if (munmap(Base.toPtr<void *>(), Size) != 0)
-      Err = joinErrors(std::move(Err), errorCodeToError(errnoAsErrorCode()));
-#endif
-
-#elif defined(_WIN32)
-    (void)Size;
-
-    if (!UnmapViewOfFile(Base.toPtr<void *>()))
-      Err = joinErrors(std::move(Err),
-                       errorCodeToError(mapWindowsError(GetLastError())));
-
-    CloseHandle(SharedMemoryFile);
-
-#endif
-
-    std::lock_guard<std::mutex> Lock(Mutex);
-    Reservations.erase(Base.toPtr<void *>());
-  }
-
-  return Err;
-#else
-  return make_error<StringError>(
+  OnComplete(make_error<StringError>(
       "SharedMemoryMapper is not supported on this platform yet",
-      inconvertibleErrorCode());
+      inconvertibleErrorCode()));
 #endif
 }
 
@@ -316,7 +292,12 @@ Error ExecutorSharedMemoryMapperService::shutdown() {
   for (const auto &R : Reservations)
     ReservationAddrs.push_back(ExecutorAddr::fromPtr(R.getFirst()));
 
-  return release(std::move(ReservationAddrs));
+  std::promise<MSVCPError> ErrP;
+  auto ErrF = ErrP.get_future();
+  release([&](Error Err) { ErrP.set_value(std::move(Err)); },
+          std::move(ReservationAddrs));
+
+  return ErrF.get();
 }
 
 void ExecutorSharedMemoryMapperService::addBootstrapSymbols(
@@ -333,48 +314,138 @@ void ExecutorSharedMemoryMapperService::addBootstrapSymbols(
       ExecutorAddr::fromPtr(&releaseWrapper);
 }
 
-llvm::orc::shared::CWrapperFunctionResult
-ExecutorSharedMemoryMapperService::reserveWrapper(const char *ArgData,
-                                                  size_t ArgSize) {
-  return shared::WrapperFunction<
-             rt::SPSExecutorSharedMemoryMapperServiceReserveSignature>::
-      handle(ArgData, ArgSize,
-             shared::makeMethodWrapperHandler(
-                 &ExecutorSharedMemoryMapperService::reserve))
-          .release();
+void ExecutorSharedMemoryMapperService::deinitializeSeq(
+    unique_function<void(Error)> OnComplete,
+    std::vector<std::pair<void *, Allocation>> Allocs, Error Err) {
+  if (Allocs.empty())
+    return OnComplete(std::move(Err));
+
+  auto DeallocActions = std::move(Allocs.back().second.DeinitializationActions);
+  Allocs.pop_back();
+
+  runDeallocActions(
+      std::move(DeallocActions),
+      [this, Allocs = std::move(Allocs), PreviousErrs = std::move(Err),
+       OnComplete = std::move(OnComplete)](Error Err) mutable {
+        deinitializeSeq(std::move(OnComplete), std::move(Allocs),
+                        joinErrors(std::move(PreviousErrs), std::move(Err)));
+      });
 }
 
-llvm::orc::shared::CWrapperFunctionResult
-ExecutorSharedMemoryMapperService::initializeWrapper(const char *ArgData,
-                                                     size_t ArgSize) {
-  return shared::WrapperFunction<
-             rt::SPSExecutorSharedMemoryMapperServiceInitializeSignature>::
-      handle(ArgData, ArgSize,
-             shared::makeMethodWrapperHandler(
-                 &ExecutorSharedMemoryMapperService::initialize))
-          .release();
+void ExecutorSharedMemoryMapperService::releaseSeq(
+    unique_function<void(Error)> OnComplete, std::vector<ExecutorAddr> Bases,
+    Error Err) {
+  if (Bases.empty())
+    return OnComplete(std::move(Err));
+
+  void *Base = Bases.back().toPtr<void *>();
+  Bases.pop_back();
+  std::optional<Reservation> R;
+  {
+    std::lock_guard<std::mutex> Lock(Mutex);
+    auto I = Reservations.find(Base);
+
+    if (LLVM_LIKELY(I != Reservations.end())) {
+      R = std::move(I->second);
+      Reservations.erase(I);
+    }
+  }
+
+  if (LLVM_LIKELY(R)) {
+    auto Allocs = std::move(R->Allocations);
+    deinitialize(
+        [this, R = std::move(*R), OnComplete = std::move(OnComplete), Base,
+         Bases = std::move(Bases),
+         PrevErr = std::move(Err)](Error Err) mutable {
+          releaseSeq(
+              std::move(OnComplete), std::move(Bases),
+              joinErrors(std::move(PrevErr),
+                         joinErrors(std::move(Err), releaseMem(Base, R))));
+        },
+        Allocs);
+  } else {
+    releaseSeq(std::move(OnComplete), std::move(Bases),
+               joinErrors(std::move(Err),
+                          make_error<StringError>("Unrecognized release base " +
+                                                      formatv("{0:x}", Base),
+                                                  inconvertibleErrorCode())));
+  }
 }
 
-llvm::orc::shared::CWrapperFunctionResult
-ExecutorSharedMemoryMapperService::deinitializeWrapper(const char *ArgData,
-                                                       size_t ArgSize) {
-  return shared::WrapperFunction<
-             rt::SPSExecutorSharedMemoryMapperServiceDeinitializeSignature>::
-      handle(ArgData, ArgSize,
-             shared::makeMethodWrapperHandler(
-                 &ExecutorSharedMemoryMapperService::deinitialize))
-          .release();
+Error ExecutorSharedMemoryMapperService::releaseMem(void *Base,
+                                                    const Reservation &R) {
+#if defined(LLVM_ON_UNIX)
+
+#if defined(__MVS__)
+  (void)Size;
+
+  if (shmdt(Base) < 0)
+    return errorCodeToError(errnoAsErrorCode());
+#else
+  if (munmap(Base, R.Size) != 0)
+    return errorCodeToError(errnoAsErrorCode());
+
+  return Error::success();
+#endif
+
+#elif defined(_WIN32) // end #if defined(LLVM_ON_UNIX)
+  (void)Size;
+
+  Error Err = !UnmapViewOfFile(Base) ? mapWindowsError(GetLastError())
+                                     : Error::success();
+
+  CloseHandle(R.SharedMemoryFile);
+
+  return Err;
+
+#endif // defined(_WIN32)
+
+  llvm_unreachable("Unsupported platform");
 }
 
-llvm::orc::shared::CWrapperFunctionResult
-ExecutorSharedMemoryMapperService::releaseWrapper(const char *ArgData,
-                                                  size_t ArgSize) {
-  return shared::WrapperFunction<
-             rt::SPSExecutorSharedMemoryMapperServiceReleaseSignature>::
-      handle(ArgData, ArgSize,
-             shared::makeMethodWrapperHandler(
-                 &ExecutorSharedMemoryMapperService::release))
-          .release();
+void ExecutorSharedMemoryMapperService::reserveWrapper(const char *ArgData,
+                                                       size_t ArgSize,
+                                                       void *SessionCtx,
+                                                       uintptr_t MsgCtx,
+                                                       shared::CYieldFn Yield) {
+  using namespace shared;
+  WrapperFunction<rt::SPSExecutorSharedMemoryMapperServiceReserveSignature>::
+      handleAsyncWithSync(ArgData, ArgSize, CYield(SessionCtx, MsgCtx, Yield),
+                          makeMethodWrapperHandler(
+                              &ExecutorSharedMemoryMapperService::reserve));
+}
+
+void ExecutorSharedMemoryMapperService::initializeWrapper(
+    const char *ArgData, size_t ArgSize, void *SessionCtx, uintptr_t MsgCtx,
+    shared::CYieldFn Yield) {
+  using namespace shared;
+  WrapperFunction<rt::SPSExecutorSharedMemoryMapperServiceInitializeSignature>::
+      handleAsyncWithSync(ArgData, ArgSize, CYield(SessionCtx, MsgCtx, Yield),
+                          makeMethodWrapperHandler(
+                              &ExecutorSharedMemoryMapperService::initialize));
+}
+
+void ExecutorSharedMemoryMapperService::deinitializeWrapper(
+    const char *ArgData, size_t ArgSize, void *SessionCtx, uintptr_t MsgCtx,
+    shared::CYieldFn Yield) {
+  using namespace shared;
+  WrapperFunction<
+      rt::SPSExecutorSharedMemoryMapperServiceDeinitializeSignature>::
+      handleAsync(ArgData, ArgSize, CYield(SessionCtx, MsgCtx, Yield),
+                  makeAsyncMethodWrapperHandler(
+                      &ExecutorSharedMemoryMapperService::deinitialize));
+}
+
+void ExecutorSharedMemoryMapperService::releaseWrapper(const char *ArgData,
+                                                       size_t ArgSize,
+                                                       void *SessionCtx,
+                                                       uintptr_t MsgCtx,
+                                                       shared::CYieldFn Yield) {
+  using namespace shared;
+  WrapperFunction<rt::SPSExecutorSharedMemoryMapperServiceReleaseSignature>::
+      handleAsync(ArgData, ArgSize, CYield(SessionCtx, MsgCtx, Yield),
+                  makeAsyncMethodWrapperHandler(
+                      &ExecutorSharedMemoryMapperService::release));
 }
 
 } // namespace rt_bootstrap

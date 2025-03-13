@@ -397,6 +397,11 @@ private:
       sys::MemoryBlock StandardSegments,
       std::vector<orc::shared::WrapperFunctionCall> DeallocActions);
 
+  void deallocate(
+      std::vector<std::vector<orc::shared::WrapperFunctionCall>> DeallocActions,
+      std::vector<sys::MemoryBlock> StandardSegmentsList, Error Err,
+      OnDeallocatedFunction OnDeallocated);
+
   uint64_t PageSize;
   std::mutex FinalizedAllocsMutex;
   RecyclingAllocator<BumpPtrAllocator, FinalizedAllocInfo> FinalizedAllocInfos;

@@ -34,11 +34,14 @@ Error deregisterEHFrameSection(const void *EHFrameSectionAddr,
 } // end namespace orc
 } // end namespace llvm
 
-extern "C" LLVM_ABI llvm::orc::shared::CWrapperFunctionResult
-llvm_orc_registerEHFrameSectionAllocAction(const char *ArgData, size_t ArgSize);
+extern "C" LLVM_ABI void
+llvm_orc_registerEHFrameSectionAllocAction(const char *Data, size_t Size,
+                                           void *SessionCtx, uintptr_t MsgCtx,
+                                           llvm::orc::shared::CYieldFn Yield);
 
-extern "C" LLVM_ABI llvm::orc::shared::CWrapperFunctionResult
-llvm_orc_deregisterEHFrameSectionAllocAction(const char *ArgData,
-                                             size_t ArgSize);
+extern "C" LLVM_ABI void
+llvm_orc_deregisterEHFrameSectionAllocAction(const char *Data, size_t Size,
+                                             void *SessionCtx, uintptr_t MsgCtx,
+                                             llvm::orc::shared::CYieldFn Yield);
 
 #endif // LLVM_EXECUTIONENGINE_ORC_TARGETPROCESS_REGISTEREHFRAMES_H

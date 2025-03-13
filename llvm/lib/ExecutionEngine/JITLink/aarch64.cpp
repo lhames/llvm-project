@@ -252,9 +252,9 @@ Error createEmptyPointerSigningFunction(LinkGraph &G) {
       1;  // To store the result.
 
   // The maximum number of signing instructions required is the maximum per
-  // location, times the number of locations, plus three instructions to
-  // materialize the return value and return.
-  size_t NumSigningInstrs = NumPtrAuthFixupLocations * MaxPtrSignSeqLength + 3;
+  // location, times the number of locations, plus five instructions to
+  // materialize the return value and yield.
+  size_t NumSigningInstrs = NumPtrAuthFixupLocations * MaxPtrSignSeqLength + 5;
 
   // Create signing function section.
   auto &SigningSection =
@@ -371,11 +371,28 @@ Error lowerPointer64AuthEdgesToSigningFunction(LinkGraph &G) {
     }
   }
 
-  // Write epilogue. x0 = 0, x1 = 1 is an SPS serialized Error::success value.
-  constexpr uint32_t RETInstr = 0xd65f03c0;
-  cantFail(writeMovRegImm64Seq(AppendInstr, 0, 0)); // mov x0, #0
-  cantFail(writeMovRegImm64Seq(AppendInstr, 1, 1)); // mov x1, #1
-  cantFail(AppendInstr(RETInstr));                  // ret
+  // Write epilogue. Our signing function is an asynchronous wrapper:
+  //
+  // typedef void (*YieldFn)(void *SessionCtx, uintptr_t MsgCtx,
+  //                         CWrapperFunctionResult R);
+  //
+  // void $__ptrauth_sign(
+  //     const char *ArgData, size_t ArgSize,
+  //     void *SessionCtx, uintptr_t MsgCtx, YieldFn Yield) {
+  //   <sign pointers>
+  //   Yield(SessionCtx, MsgCtx, toWFR(Error::success()));
+  // }
+  //
+  // To branch to the yield function (x4) we need to rotate the incoming
+  // SessionCtx and MsgCtx arguments (x2 and x3) into x0 and x1 (first two
+  // arguments to yield), and then set x2 = 0, x3 = 1
+  // (R = Error::success()).
+  constexpr uint32_t BrX4Instr = 0xd61f0080;
+  cantFail(writeMovRegRegSeq(AppendInstr, 0, 2));
+  cantFail(writeMovRegRegSeq(AppendInstr, 1, 3));
+  cantFail(writeMovRegImm64Seq(AppendInstr, 2, 0)); // mov x2, #0
+  cantFail(writeMovRegImm64Seq(AppendInstr, 3, 1)); // mov x3, #1
+  cantFail(AppendInstr(BrX4Instr));                 // ret
 
   // Add an allocation action to call the signing function.
   using namespace orc::shared;

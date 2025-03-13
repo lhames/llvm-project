@@ -48,14 +48,14 @@ Error release(MemoryMapper &M, const std::vector<ExecutorAddr> &Reservations) {
 }
 
 // A basic function to be used as both initializer/deinitializer
-CWrapperFunctionResult incrementWrapper(const char *ArgData, size_t ArgSize) {
-  return WrapperFunction<SPSError(SPSExecutorAddr)>::handle(
-             ArgData, ArgSize,
-             [](ExecutorAddr A) -> Error {
-               *A.toPtr<int *>() += 1;
-               return Error::success();
-             })
-      .release();
+void incrementWrapper(const char *ArgData, size_t ArgSize, void *SessionCtx,
+                      uintptr_t MsgCtx, CYieldFn Yield) {
+  WrapperFunction<SPSError(SPSExecutorAddr)>::handleAsyncWithSync(
+      ArgData, ArgSize, CYield(SessionCtx, MsgCtx, Yield),
+      [](ExecutorAddr A) -> Error {
+        *A.toPtr<int *>() += 1;
+        return Error::success();
+      });
 }
 
 TEST(MemoryMapperTest, InitializeDeinitialize) {

@@ -8,45 +8,165 @@
 
 #include "llvm/ExecutionEngine/Orc/Shared/AllocationActions.h"
 
-namespace llvm {
-namespace orc {
-namespace shared {
+using namespace llvm;
+using namespace llvm::orc;
+using namespace llvm::orc::shared;
 
-void runFinalizeActions(AllocActions &AAs,
-                        OnRunFinalizeActionsCompleteFn OnComplete) {
-  std::vector<WrapperFunctionCall> DeallocActions;
-  DeallocActions.reserve(numDeallocActions(AAs));
+namespace {
 
-  for (auto &AA : AAs) {
-    if (AA.Finalize)
+Error flattenErrorResult(WrapperFunctionResult R) {
+  using namespace shared::detail;
 
-      if (auto Err = AA.Finalize.runWithSPSRetErrorMerged()) {
-        while (!DeallocActions.empty()) {
-          Err = joinErrors(std::move(Err),
-                           DeallocActions.back().runWithSPSRetErrorMerged());
-          DeallocActions.pop_back();
-        }
-        return OnComplete(std::move(Err));
-      }
+  if (const char *ErrMsg = R.getOutOfBandError())
+    return make_error<StringError>(ErrMsg, inconvertibleErrorCode());
 
-    if (AA.Dealloc)
-      DeallocActions.push_back(std::move(AA.Dealloc));
-  }
+  SPSSerializableError RErr;
+  SPSInputBuffer IB(R.data(), R.size());
+  if (!SPSArgList<SPSError>::deserialize(IB, RErr))
+    return make_error<StringError>(
+        "Could not deserialize allocation action result",
+        inconvertibleErrorCode());
 
-  AAs.clear();
-  OnComplete(std::move(DeallocActions));
+  if (RErr.HasError)
+    return make_error<StringError>(std::move(RErr.ErrMsg),
+                                   inconvertibleErrorCode());
+
+  return Error::success();
 }
 
-void runDeallocActions(ArrayRef<WrapperFunctionCall> DAs,
-                       OnRunDeallocActionsComeleteFn OnComplete) {
+class FinalizeActionsRunner {
+public:
+  static void run(AllocActions &&AAs,
+                  OnRunFinalizeActionsCompleteFn &&OnComplete) {
+    auto *Runner =
+        new FinalizeActionsRunner(std::move(AAs), std::move(OnComplete));
+    runNextFinalizeAction(static_cast<void *>(Runner), 0, Error::success());
+  }
+
+private:
+  FinalizeActionsRunner(AllocActions &&AAs,
+                        OnRunFinalizeActionsCompleteFn OnComplete)
+      : AAs(std::move(AAs)), OnComplete(std::move(OnComplete)) {}
+
+  static void runNextFinalizeAction(void *SessionCtx, uintptr_t MsgCtx,
+                                    CWrapperFunctionResult R) {
+    runNextFinalizeAction(SessionCtx, MsgCtx, flattenErrorResult(R));
+  }
+
+  static void runNextFinalizeAction(void *SessionCtx, uintptr_t MsgCtx,
+                                    Error Err) {
+    // If there's an error then run dealloc actions corresponding to previously
+    // run actions.
+    if (Err) {
+      assert(MsgCtx != 0 && "Can't error before running the first action");
+      return runNextDeallocAction(SessionCtx, MsgCtx, std::move(Err));
+    }
+
+    auto *This = static_cast<FinalizeActionsRunner *>(SessionCtx);
+
+    // Skip any null finalize actions.
+    while (LLVM_UNLIKELY(MsgCtx != This->AAs.size() &&
+                         !This->AAs[MsgCtx].Finalize))
+      ++MsgCtx;
+
+    if (MsgCtx == This->AAs.size()) {
+      // If we got here then there must not have been any error running the
+      // finalize Actions
+      cantFail(std::move(This->Err));
+
+      auto OnComplete = std::move(This->OnComplete);
+      std::vector<WrapperFunctionCall> DeallocActions;
+      DeallocActions.reserve(This->AAs.size());
+      for (auto &AA : reverse(This->AAs))
+        if (AA.Dealloc) // Skip any null dealloc actions.
+          DeallocActions.push_back(AA.Dealloc);
+      delete This;
+      return OnComplete(std::move(DeallocActions));
+    }
+
+    This->AAs[MsgCtx].Finalize.run(SessionCtx, MsgCtx + 1,
+                                   runNextFinalizeAction);
+  }
+
+  static void runNextDeallocAction(void *SessionCtx, uintptr_t MsgCtx,
+                                   CWrapperFunctionResult R) {
+    runNextDeallocAction(SessionCtx, MsgCtx, flattenErrorResult(R));
+  }
+
+  static void runNextDeallocAction(void *SessionCtx, uintptr_t MsgCtx,
+                                   Error Err) {
+    auto *This = static_cast<FinalizeActionsRunner *>(SessionCtx);
+    Err = joinErrors(std::move(This->Err), std::move(Err));
+
+    // Skip any null dealloc actions.
+    while (MsgCtx != 0 && !This->AAs[MsgCtx - 1].Dealloc)
+      --MsgCtx;
+
+    if (MsgCtx == 0) {
+      auto OnComplete = std::move(This->OnComplete);
+      delete This;
+      return OnComplete(std::move(Err));
+    }
+
+    This->AAs[MsgCtx - 1].Dealloc.run(SessionCtx, MsgCtx - 1,
+                                      runNextDeallocAction);
+  }
+
+  AllocActions AAs;
+  OnRunFinalizeActionsCompleteFn OnComplete;
   Error Err = Error::success();
-  while (!DAs.empty()) {
-    Err = joinErrors(std::move(Err), DAs.back().runWithSPSRetErrorMerged());
-    DAs = DAs.drop_back();
+};
+
+class DeallocActionsRunner {
+public:
+  static void run(std::vector<WrapperFunctionCall> &&DeallocActions,
+                  OnRunDeallocActionsCompleteFn &&OnComplete) {
+    auto *Runner = new DeallocActionsRunner(std::move(DeallocActions),
+                                            std::move(OnComplete));
+    runNextDeallocAction(static_cast<void *>(Runner), 0, Error::success());
   }
-  OnComplete(std::move(Err));
+
+  static void runNextDeallocAction(void *SessionCtx, uintptr_t MsgCtx,
+                                   CWrapperFunctionResult R) {
+    runNextDeallocAction(SessionCtx, MsgCtx, flattenErrorResult(R));
+  }
+
+  static void runNextDeallocAction(void *SessionCtx, uintptr_t MsgCtx,
+                                   Error Err) {
+    auto *This = static_cast<DeallocActionsRunner *>(SessionCtx);
+    Err = joinErrors(std::move(This->Err), std::move(Err));
+
+    if (MsgCtx == This->DAs.size()) {
+      auto OnComplete = std::move(This->OnComplete);
+      delete This;
+      return OnComplete(std::move(Err));
+    }
+    This->Err = std::move(Err);
+    This->DAs[MsgCtx].run(SessionCtx, MsgCtx + 1, runNextDeallocAction);
+  }
+
+private:
+  DeallocActionsRunner(std::vector<WrapperFunctionCall> &&DAs,
+                       OnRunDeallocActionsCompleteFn OnComplete)
+      : DAs(std::move(DAs)), OnComplete(std::move(OnComplete)) {}
+
+  std::vector<WrapperFunctionCall> DAs;
+  OnRunDeallocActionsCompleteFn OnComplete;
+  Error Err = Error::success();
+};
+
+} // anonymous namespace
+
+namespace llvm::orc::shared {
+
+void runFinalizeActions(AllocActions &&AAs,
+                        OnRunFinalizeActionsCompleteFn &&OnComplete) {
+  FinalizeActionsRunner::run(std::move(AAs), std::move(OnComplete));
 }
 
-} // namespace shared
-} // namespace orc
-} // namespace llvm
+void runDeallocActions(std::vector<WrapperFunctionCall> &&DAs,
+                       OnRunDeallocActionsCompleteFn &&OnComplete) {
+  DeallocActionsRunner::run(std::move(DAs), std::move(OnComplete));
+}
+
+} // namespace llvm::orc::shared

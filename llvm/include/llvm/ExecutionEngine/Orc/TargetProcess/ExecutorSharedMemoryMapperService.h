@@ -34,8 +34,10 @@ public:
   Expected<ExecutorAddr> initialize(ExecutorAddr Reservation,
                                     tpctypes::SharedMemoryFinalizeRequest &FR);
 
-  Error deinitialize(const std::vector<ExecutorAddr> &Bases);
-  Error release(const std::vector<ExecutorAddr> &Bases);
+  void deinitialize(unique_function<void(Error)> OnComplete,
+                    const std::vector<ExecutorAddr> &Bases);
+  void release(unique_function<void(Error)> OnComplete,
+               std::vector<ExecutorAddr> Bases);
 
   Error shutdown() override;
   void addBootstrapSymbols(StringMap<ExecutorAddr> &M) override;
@@ -55,17 +57,30 @@ private:
   };
   using ReservationMap = DenseMap<void *, Reservation>;
 
-  static llvm::orc::shared::CWrapperFunctionResult
-  reserveWrapper(const char *ArgData, size_t ArgSize);
+  void deinitializeSeq(unique_function<void(Error)> OnComplete,
+                       std::vector<std::pair<void *, Allocation>> Allocs,
+                       Error Err);
 
-  static llvm::orc::shared::CWrapperFunctionResult
-  initializeWrapper(const char *ArgData, size_t ArgSize);
+  void releaseSeq(unique_function<void(Error)> OnComplete,
+                  std::vector<ExecutorAddr> Bases, Error Err);
 
-  static llvm::orc::shared::CWrapperFunctionResult
-  deinitializeWrapper(const char *ArgData, size_t ArgSize);
+  Error releaseMem(void *Base, const Reservation &R);
 
-  static llvm::orc::shared::CWrapperFunctionResult
-  releaseWrapper(const char *ArgData, size_t ArgSize);
+  static void reserveWrapper(const char *ArgData, size_t ArgSize,
+                             void *SessionCtx, uintptr_t MsgCtx,
+                             shared::CYieldFn Yield);
+
+  static void initializeWrapper(const char *ArgData, size_t ArgSize,
+                                void *SessionCtx, uintptr_t MsgCtx,
+                                shared::CYieldFn Yield);
+
+  static void deinitializeWrapper(const char *ArgData, size_t ArgSize,
+                                  void *SessionCtx, uintptr_t MsgCtx,
+                                  shared::CYieldFn Yield);
+
+  static void releaseWrapper(const char *ArgData, size_t ArgSize,
+                             void *SessionCtx, uintptr_t MsgCtx,
+                             shared::CYieldFn Yield);
 
 #if (defined(LLVM_ON_UNIX) && !defined(__ANDROID__)) || defined(_WIN32)
   std::atomic<int> SharedMemoryCount{0};

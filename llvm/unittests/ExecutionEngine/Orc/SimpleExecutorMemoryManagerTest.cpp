@@ -20,14 +20,14 @@ using namespace llvm::orc::rt_bootstrap;
 
 namespace {
 
-CWrapperFunctionResult incrementWrapper(const char *ArgData, size_t ArgSize) {
-  return WrapperFunction<SPSError(SPSExecutorAddr)>::handle(
-             ArgData, ArgSize,
-             [](ExecutorAddr A) -> Error {
-               *A.toPtr<int *>() += 1;
-               return Error::success();
-             })
-      .release();
+void incrementWrapper(const char *ArgData, size_t ArgSize, void *SessionCtx,
+                      uintptr_t MsgCtx, CYieldFn Yield) {
+  WrapperFunction<SPSError(SPSExecutorAddr)>::handleAsyncWithSync(
+      ArgData, ArgSize, CYield(SessionCtx, MsgCtx, Yield),
+      [](ExecutorAddr A) -> Error {
+        *A.toPtr<int *>() += 1;
+        return Error::success();
+      });
 }
 
 TEST(SimpleExecutorMemoryManagerTest, AllocFinalizeFree) {
@@ -61,16 +61,22 @@ TEST(SimpleExecutorMemoryManagerTest, AllocFinalizeFree) {
   EXPECT_EQ(FinalizeCounter, 0);
   EXPECT_EQ(DeallocateCounter, 0);
 
-  auto FinalizeErr = MemMgr.finalize(FR);
-  EXPECT_THAT_ERROR(std::move(FinalizeErr), Succeeded());
+  MemMgr.finalize(
+      [](Error FinalizeErr) {
+        EXPECT_THAT_ERROR(std::move(FinalizeErr), Succeeded());
+      },
+      FR);
 
   EXPECT_EQ(FinalizeCounter, 1);
   EXPECT_EQ(DeallocateCounter, 0);
 
   EXPECT_EQ(HW, std::string(Mem->toPtr<const char *>()));
 
-  auto DeallocateErr = MemMgr.deallocate({*Mem});
-  EXPECT_THAT_ERROR(std::move(DeallocateErr), Succeeded());
+  MemMgr.deallocate(
+      [](Error DeallocateErr) {
+        EXPECT_THAT_ERROR(std::move(DeallocateErr), Succeeded());
+      },
+      {*Mem});
 
   EXPECT_EQ(FinalizeCounter, 1);
   EXPECT_EQ(DeallocateCounter, 1);

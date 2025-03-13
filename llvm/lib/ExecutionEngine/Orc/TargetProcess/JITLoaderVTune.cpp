@@ -91,23 +91,25 @@ static void registerJITLoaderVTuneUnregisterImpl(
   }
 }
 
-extern "C" llvm::orc::shared::CWrapperFunctionResult
-llvm_orc_registerVTuneImpl(const char *ArgData, size_t ArgSize) {
-  using namespace orc::shared;
+extern "C" void llvm_orc_registerVTuneImpl(const char *Data, size_t Size,
+                                           void *SessionCtx, uintptr_t MsgCtx,
+                                           shared::CYieldFn Yield) {
+  using namespace shared;
   if (!JITEventWrapper::Wrapper)
     JITEventWrapper::Wrapper.reset(new IntelJITEventsWrapper);
 
-  return WrapperFunction<SPSError(SPSVTuneMethodBatch)>::handle(
-             ArgData, ArgSize, registerJITLoaderVTuneRegisterImpl)
-      .release();
+  return WrapperFunction<SPSError(SPSVTuneMethodBatch)>::handleAsyncWithSync(
+      Data, Size, CYield(SessionCtx, MsgCtx, Yield),
+      registerJITLoaderVTuneRegisterImpl);
 }
 
-extern "C" llvm::orc::shared::CWrapperFunctionResult
-llvm_orc_unregisterVTuneImpl(const char *ArgData, size_t ArgSize) {
-  using namespace orc::shared;
-  return WrapperFunction<void(SPSVTuneUnloadedMethodIDs)>::handle(
-             ArgData, ArgSize, registerJITLoaderVTuneUnregisterImpl)
-      .release();
+extern "C" void llvm_orc_unregisterVTuneImpl(const char *Data, size_t Size,
+                                             void *SessionCtx, uintptr_t MsgCtx,
+                                             shared::CYieldFn Yield) {
+  using namespace shared;
+  return WrapperFunction<void(SPSVTuneUnloadedMethodIDs)>::handleAsyncWithSync(
+      Data, Size, CYield(SessionCtx, MsgCtx, CYield),
+      registerJITLoaderVTuneUnregisterImpl);
 }
 
 // For Testing: following code comes from llvm-jitlistener.cpp in llvm tools
@@ -173,14 +175,16 @@ static unsigned int GetNewMethodID(void) {
   return ++id;
 }
 
-extern "C" llvm::orc::shared::CWrapperFunctionResult
-llvm_orc_test_registerVTuneImpl(const char *ArgData, size_t ArgSize) {
-  using namespace orc::shared;
+extern "C" void llvm_orc_test_registerVTuneImpl(const char *Data, size_t Size,
+                                                void *SessionCtx,
+                                                uintptr_t MsgCtx,
+                                                CYieldFn Yield) {
+  using namespace shared;
   JITEventWrapper::Wrapper.reset(new IntelJITEventsWrapper(
       NotifyEvent, NULL, NULL, IsProfilingActive, 0, 0, GetNewMethodID));
-  return WrapperFunction<SPSError(SPSVTuneMethodBatch)>::handle(
-             ArgData, ArgSize, registerJITLoaderVTuneRegisterImpl)
-      .release();
+  WrapperFunction<SPSError(SPSVTuneMethodBatch)>::handleAsyncWithSync(
+      Data, Size, CYield(SessionCtx, MsgCtx, Yield),
+      registerJITLoaderVTuneRegisterImpl);
 }
 
 #else
@@ -197,28 +201,29 @@ static void unsuppported(const std::vector<std::pair<uint64_t, uint64_t>> &UM) {
 
 }
 
-extern "C" llvm::orc::shared::CWrapperFunctionResult
-llvm_orc_registerVTuneImpl(const char *ArgData, size_t ArgSize) {
-  using namespace orc::shared;
-  return WrapperFunction<SPSError(SPSVTuneMethodBatch)>::handle(
-             ArgData, ArgSize, unsupportedBatch)
-      .release();
+extern "C" void llvm_orc_registerVTuneImpl(const char *Data, size_t Size,
+                                           void *SessionCtx, uintptr_t MsgCtx,
+                                           shared::CYieldFn Yield) {
+  using namespace shared;
+  WrapperFunction<SPSError(SPSVTuneMethodBatch)>::handleAsyncWithSync(
+      Data, Size, CYield(SessionCtx, MsgCtx, Yield), unsupportedBatch);
 }
 
-extern "C" llvm::orc::shared::CWrapperFunctionResult
-llvm_orc_unregisterVTuneImpl(const char *ArgData, size_t ArgSize) {
-  using namespace orc::shared;
-  return WrapperFunction<void(SPSVTuneUnloadedMethodIDs)>::handle(
-             ArgData, ArgSize, unsuppported)
-      .release();
+extern "C" void llvm_orc_unregisterVTuneImpl(const char *Data, size_t Size,
+                                             void *SessionCtx, uintptr_t MsgCtx,
+                                             shared::CYieldFn Yield) {
+  using namespace shared;
+  WrapperFunction<void(SPSVTuneUnloadedMethodIDs)>::handleAsyncWithSync(
+      Data, Size, CYield(SessionCtx, MsgCtx, Yield), unsuppported);
 }
 
-extern "C" llvm::orc::shared::CWrapperFunctionResult
-llvm_orc_test_registerVTuneImpl(const char *ArgData, size_t ArgSize) {
-  using namespace orc::shared;
-  return WrapperFunction<SPSError(SPSVTuneMethodBatch)>::handle(
-             ArgData, ArgSize, unsupportedBatch)
-      .release();
+extern "C" void llvm_orc_test_registerVTuneImpl(const char *Data, size_t Size,
+                                                void *SessionCtx,
+                                                uintptr_t MsgCtx,
+                                                shared::CYieldFn Yield) {
+  using namespace shared;
+  WrapperFunction<SPSError(SPSVTuneMethodBatch)>::handleAsyncWithSync(
+      Data, Size, CYield(SessionCtx, MsgCtx, Yield), unsupportedBatch);
 }
 
 #endif

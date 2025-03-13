@@ -17,14 +17,19 @@
 #include "llvm/Support/Compiler.h"
 #include <cstdint>
 
-extern "C" LLVM_ABI llvm::orc::shared::CWrapperFunctionResult
-llvm_orc_registerVTuneImpl(const char *ArgData, size_t ArgSize);
+extern "C" LLVM_ABI void
+llvm_orc_registerVTuneImpl(const char *Data, size_t Size, void *SessionCtx,
+                           uintptr_t MsgCtx, llvm::orc::shared::CYieldFn Yield);
 
-extern "C" LLVM_ABI llvm::orc::shared::CWrapperFunctionResult
-llvm_orc_unregisterVTuneImpl(const char *ArgData, size_t ArgSize);
+extern "C" LLVM_ABI void
+llvm_orc_unregisterVTuneImpl(const char *Data, size_t Size, void *SessionCtx,
+                             uintptr_t MsgCtx,
+                             llvm::orc::shared::CYieldFn Yield);
 
-extern "C" LLVM_ABI llvm::orc::shared::CWrapperFunctionResult
-llvm_orc_test_registerVTuneImpl(const char *ArgData, size_t ArgSize);
+extern "C" LLVM_ABI void
+llvm_orc_test_registerVTuneImpl(const char *Data, size_t Size, void *SessionCtx,
+                                uintptr_t MsgCtx,
+                                llvm::orc::shared::CYieldFn Yield);
 
 #endif // LLVM_EXECUTIONENGINE_ORC_TARGETPROCESS_JITLOADERVTUNE_H
 

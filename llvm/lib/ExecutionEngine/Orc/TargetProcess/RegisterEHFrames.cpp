@@ -8,6 +8,7 @@
 
 #include "llvm/ExecutionEngine/Orc/TargetProcess/RegisterEHFrames.h"
 
+#include "llvm/ADT/FunctionExtras.h"
 #include "llvm/Config/config.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/DynamicLibrary.h"
@@ -153,28 +154,28 @@ Error deregisterEHFrameSection(const void *EHFrameSectionAddr,
 } // end namespace orc
 } // end namespace llvm
 
-static Error registerEHFrameWrapper(ExecutorAddrRange EHFrame) {
-  return llvm::orc::registerEHFrameSection(EHFrame.Start.toPtr<const void *>(),
-                                           EHFrame.size());
+extern "C" void llvm_orc_registerEHFrameSectionAllocAction(const char *Data,
+                                                           size_t Size,
+                                                           void *SessionCtx,
+                                                           uintptr_t MsgCtx,
+                                                           CYieldFn Yield) {
+  WrapperFunction<SPSError(SPSExecutorAddrRange)>::handleAsync(
+      Data, Size, CYield(SessionCtx, MsgCtx, Yield),
+      [](unique_function<void(Error)> SendResult, ExecutorAddrRange R) {
+        SendResult(
+            registerEHFrameSection(R.Start.toPtr<const void *>(), R.size()));
+      });
 }
 
-static Error deregisterEHFrameWrapper(ExecutorAddrRange EHFrame) {
-  return llvm::orc::deregisterEHFrameSection(
-      EHFrame.Start.toPtr<const void *>(), EHFrame.size());
-}
-
-extern "C" orc::shared::CWrapperFunctionResult
-llvm_orc_registerEHFrameSectionAllocAction(const char *ArgData,
-                                           size_t ArgSize) {
-  return WrapperFunction<SPSError(SPSExecutorAddrRange)>::handle(
-             ArgData, ArgSize, registerEHFrameWrapper)
-      .release();
-}
-
-extern "C" orc::shared::CWrapperFunctionResult
-llvm_orc_deregisterEHFrameSectionAllocAction(const char *ArgData,
-                                             size_t ArgSize) {
-  return WrapperFunction<SPSError(SPSExecutorAddrRange)>::handle(
-             ArgData, ArgSize, deregisterEHFrameWrapper)
-      .release();
+extern "C" void llvm_orc_deregisterEHFrameSectionAllocAction(const char *Data,
+                                                             size_t Size,
+                                                             void *SessionCtx,
+                                                             uintptr_t MsgCtx,
+                                                             CYieldFn Yield) {
+  WrapperFunction<SPSError(SPSExecutorAddrRange)>::handleAsync(
+      Data, Size, CYield(SessionCtx, MsgCtx, Yield),
+      [](unique_function<void(Error)> SendResult, ExecutorAddrRange R) {
+        SendResult(
+            deregisterEHFrameSection(R.Start.toPtr<const void *>(), R.size()));
+      });
 }

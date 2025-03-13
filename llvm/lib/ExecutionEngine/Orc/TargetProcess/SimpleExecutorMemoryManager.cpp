@@ -10,8 +10,13 @@
 
 #include "llvm/ExecutionEngine/Orc/Shared/OrcRTBridge.h"
 #include "llvm/Support/FormatVariadic.h"
+#include "llvm/Support/MSVCErrorWorkarounds.h"
+
+#include <future>
 
 #define DEBUG_TYPE "orc"
+
+using namespace llvm::orc::shared;
 
 namespace llvm {
 namespace orc {
@@ -33,96 +38,56 @@ Expected<ExecutorAddr> SimpleExecutorMemoryManager::allocate(uint64_t Size) {
   return ExecutorAddr::fromPtr(MB.base());
 }
 
-Error SimpleExecutorMemoryManager::finalize(tpctypes::FinalizeRequest &FR) {
-  ExecutorAddr Base(~0ULL);
-  std::vector<shared::WrapperFunctionCall> DeallocationActions;
-  size_t SuccessfulFinalizationActions = 0;
+void SimpleExecutorMemoryManager::finalize(
+    unique_function<void(Error)> OnComplete, tpctypes::FinalizeRequest FR) {
+  // TODO: Check that segments don't overlap prior to taking any actions?
+  //       This would require registering the range up-front and then removing
+  //       it again if any actions errored out.
+  // TODO: Check for duplicate finalization?
 
   if (FR.Segments.empty()) {
-    // NOTE: Finalizing nothing is currently a no-op. Should it be an error?
     if (FR.Actions.empty())
-      return Error::success();
+      return OnComplete(Error::success());
     else
-      return make_error<StringError>("Finalization actions attached to empty "
-                                     "finalization request",
-                                     inconvertibleErrorCode());
+      return OnComplete(
+          make_error<StringError>("Finalization actions attached to empty "
+                                  "finalization request",
+                                  inconvertibleErrorCode()));
   }
 
-  for (auto &Seg : FR.Segments)
-    Base = std::min(Base, Seg.Addr);
-
-  for (auto &ActPair : FR.Actions)
-    if (ActPair.Dealloc)
-      DeallocationActions.push_back(ActPair.Dealloc);
-
-  // Get the Allocation for this finalization.
-  size_t AllocSize = 0;
-  {
-    std::lock_guard<std::mutex> Lock(M);
-    auto I = Allocations.find(Base.toPtr<void *>());
-    if (I == Allocations.end())
-      return make_error<StringError>("Attempt to finalize unrecognized "
-                                     "allocation " +
-                                         formatv("{0:x}", Base.getValue()),
-                                     inconvertibleErrorCode());
-    AllocSize = I->second.Size;
-    I->second.DeallocationActions = std::move(DeallocationActions);
+  // Find the address range for this allocation to use as a key.
+  ExecutorAddrRange AllocRange(FR.Segments.front().Addr,
+                               FR.Segments.front().Addr);
+  for (auto &Seg : FR.Segments) {
+    AllocRange.Start = std::min(AllocRange.Start, Seg.Addr);
+    AllocRange.End = std::max(AllocRange.End, Seg.Addr + Seg.Size);
   }
-  ExecutorAddr AllocEnd = Base + ExecutorAddrDiff(AllocSize);
 
-  // Bail-out function: this will run deallocation actions corresponding to any
-  // completed finalization actions, then deallocate memory.
-  auto BailOut = [&](Error Err) {
-    std::pair<void *, Allocation> AllocToDestroy;
-
-    // Get allocation to destroy.
-    {
-      std::lock_guard<std::mutex> Lock(M);
-      auto I = Allocations.find(Base.toPtr<void *>());
-
-      // Check for missing allocation (effective a double free).
-      if (I == Allocations.end())
-        return joinErrors(
-            std::move(Err),
-            make_error<StringError>("No allocation entry found "
-                                    "for " +
-                                        formatv("{0:x}", Base.getValue()),
-                                    inconvertibleErrorCode()));
-      AllocToDestroy = std::move(*I);
-      Allocations.erase(I);
-    }
-
-    // Run deallocation actions for all completed finalization actions.
-    while (SuccessfulFinalizationActions)
-      Err =
-          joinErrors(std::move(Err), FR.Actions[--SuccessfulFinalizationActions]
-                                         .Dealloc.runWithSPSRetErrorMerged());
-
-    // Deallocate memory.
-    sys::MemoryBlock MB(AllocToDestroy.first, AllocToDestroy.second.Size);
-    if (auto EC = sys::Memory::releaseMappedMemory(MB))
-      Err = joinErrors(std::move(Err), errorCodeToError(EC));
-
-    return Err;
+  // Deallocate memory.
+  auto ReleaseMemory = [AllocRange](Error Err) -> Error {
+    sys::MemoryBlock MB(AllocRange.Start.toPtr<void *>(), AllocRange.size());
+    auto EC = sys::Memory::releaseMappedMemory(MB);
+    return joinErrors(std::move(Err), errorCodeToError(EC));
   };
+  auto Abandon = [&](Error Err) { OnComplete(ReleaseMemory(std::move(Err))); };
 
   // Copy content and apply permissions.
   for (auto &Seg : FR.Segments) {
 
     // Check segment ranges.
     if (LLVM_UNLIKELY(Seg.Size < Seg.Content.size()))
-      return BailOut(make_error<StringError>(
+      return Abandon(make_error<StringError>(
           formatv("Segment {0:x} content size ({1:x} bytes) "
                   "exceeds segment size ({2:x} bytes)",
                   Seg.Addr.getValue(), Seg.Content.size(), Seg.Size),
           inconvertibleErrorCode()));
     ExecutorAddr SegEnd = Seg.Addr + ExecutorAddrDiff(Seg.Size);
-    if (LLVM_UNLIKELY(Seg.Addr < Base || SegEnd > AllocEnd))
-      return BailOut(make_error<StringError>(
+    if (LLVM_UNLIKELY(Seg.Addr < AllocRange.Start || SegEnd > AllocRange.End))
+      return Abandon(make_error<StringError>(
           formatv("Segment {0:x} -- {1:x} crosses boundary of "
                   "allocation {2:x} -- {3:x}",
-                  Seg.Addr.getValue(), SegEnd.getValue(), Base.getValue(),
-                  AllocEnd.getValue()),
+                  Seg.Addr.getValue(), SegEnd.getValue(),
+                  AllocRange.Start.getValue(), AllocRange.End.getValue()),
           inconvertibleErrorCode()));
 
     char *Mem = Seg.Addr.toPtr<char *>();
@@ -133,23 +98,26 @@ Error SimpleExecutorMemoryManager::finalize(tpctypes::FinalizeRequest &FR) {
     if (auto EC = sys::Memory::protectMappedMemory(
             {Mem, static_cast<size_t>(Seg.Size)},
             toSysMemoryProtectionFlags(Seg.RAG.Prot)))
-      return BailOut(errorCodeToError(EC));
+      return Abandon(errorCodeToError(EC));
     if ((Seg.RAG.Prot & MemProt::Exec) == MemProt::Exec)
       sys::Memory::InvalidateInstructionCache(Mem, Seg.Size);
   }
 
-  // Run finalization actions.
-  for (auto &ActPair : FR.Actions) {
-    if (auto Err = ActPair.Finalize.runWithSPSRetErrorMerged())
-      return BailOut(std::move(Err));
-    ++SuccessfulFinalizationActions;
-  }
-
-  return Error::success();
+  runFinalizeActions(
+      std::move(FR.Actions),
+      [this, R = std::move(AllocRange), OnComplete = std::move(OnComplete),
+       ReleaseMemory = std::move(ReleaseMemory)](
+          Expected<std::vector<WrapperFunctionCall>> DeallocActions) mutable {
+        if (!DeallocActions)
+          return OnComplete(ReleaseMemory(DeallocActions.takeError()));
+        if (auto Err = recordFinalizedAlloc(R, std::move(*DeallocActions)))
+          return OnComplete(ReleaseMemory(std::move(Err)));
+        OnComplete(Error::success());
+      });
 }
 
-Error SimpleExecutorMemoryManager::deallocate(
-    const std::vector<ExecutorAddr> &Bases) {
+void SimpleExecutorMemoryManager::deallocate(
+    unique_function<void(Error)> OnComplete, std::vector<ExecutorAddr> Bases) {
   std::vector<std::pair<void *, Allocation>> AllocPairs;
   AllocPairs.reserve(Bases.size());
 
@@ -167,20 +135,13 @@ Error SimpleExecutorMemoryManager::deallocate(
       } else
         Err = joinErrors(
             std::move(Err),
-            make_error<StringError>("No allocation entry found "
-                                    "for " +
+            make_error<StringError>("No allocation entry found for " +
                                         formatv("{0:x}", Base.getValue()),
                                     inconvertibleErrorCode()));
     }
   }
 
-  while (!AllocPairs.empty()) {
-    auto &P = AllocPairs.back();
-    Err = joinErrors(std::move(Err), deallocateImpl(P.first, P.second));
-    AllocPairs.pop_back();
-  }
-
-  return Err;
+  deallocateSeq(std::move(OnComplete), std::move(AllocPairs), std::move(Err));
 }
 
 Error SimpleExecutorMemoryManager::shutdown() {
@@ -191,10 +152,17 @@ Error SimpleExecutorMemoryManager::shutdown() {
     AM = std::move(Allocations);
   }
 
-  Error Err = Error::success();
-  for (auto &KV : AM)
-    Err = joinErrors(std::move(Err), deallocateImpl(KV.first, KV.second));
-  return Err;
+  std::vector<std::pair<void *, Allocation>> Allocs;
+  for (auto &[Addr, Alloc] : AM)
+    Allocs.push_back(std::make_pair(std::move(Addr), std::move(Alloc)));
+
+  std::promise<MSVCPError> ErrP;
+  auto ErrF = ErrP.get_future();
+
+  deallocateSeq([&](Error Err) { ErrP.set_value(std::move(Err)); },
+                std::move(Allocs), Error::success());
+
+  return ErrF.get();
 }
 
 void SimpleExecutorMemoryManager::addBootstrapSymbols(
@@ -208,53 +176,71 @@ void SimpleExecutorMemoryManager::addBootstrapSymbols(
       ExecutorAddr::fromPtr(&deallocateWrapper);
 }
 
-Error SimpleExecutorMemoryManager::deallocateImpl(void *Base, Allocation &A) {
-  Error Err = Error::success();
+Error SimpleExecutorMemoryManager::recordFinalizedAlloc(
+    ExecutorAddrRange R,
+    std::vector<shared::WrapperFunctionCall> DeallocActions) {
+  std::lock_guard<std::mutex> Lock(M);
 
-  while (!A.DeallocationActions.empty()) {
-    Err = joinErrors(std::move(Err),
-                     A.DeallocationActions.back().runWithSPSRetErrorMerged());
-    A.DeallocationActions.pop_back();
-  }
+  auto I = Allocations.find(R.Start.toPtr<void *>());
+  if (I == Allocations.end())
+    return make_error<StringError>("Allocation at " +
+                                       formatv("{0:x}", R.Start) +
+                                       " overlaps existing allocation",
+                                   inconvertibleErrorCode());
 
-  sys::MemoryBlock MB(Base, A.Size);
-  if (auto EC = sys::Memory::releaseMappedMemory(MB))
-    Err = joinErrors(std::move(Err), errorCodeToError(EC));
-
-  return Err;
+  I->second.DeallocActions = std::move(DeallocActions);
+  return Error::success();
 }
 
-llvm::orc::shared::CWrapperFunctionResult
-SimpleExecutorMemoryManager::reserveWrapper(const char *ArgData,
-                                            size_t ArgSize) {
-  return shared::WrapperFunction<
-             rt::SPSSimpleExecutorMemoryManagerReserveSignature>::
-      handle(ArgData, ArgSize,
-             shared::makeMethodWrapperHandler(
-                 &SimpleExecutorMemoryManager::allocate))
-          .release();
+void SimpleExecutorMemoryManager::deallocateSeq(
+    unique_function<void(Error)> OnComplete,
+    std::vector<std::pair<void *, Allocation>> Allocs, Error Err) {
+  if (Allocs.empty())
+    return OnComplete(std::move(Err));
+
+  auto A = Allocs.back();
+  Allocs.pop_back();
+
+  runDeallocActions(
+      std::move(A.second.DeallocActions),
+      [this, Allocs = std::move(Allocs), PreviousErrs = std::move(Err),
+       OnComplete = std::move(OnComplete)](Error Err) mutable {
+        deallocateSeq(std::move(OnComplete), std::move(Allocs),
+                      joinErrors(std::move(PreviousErrs), std::move(Err)));
+      });
 }
 
-llvm::orc::shared::CWrapperFunctionResult
-SimpleExecutorMemoryManager::finalizeWrapper(const char *ArgData,
-                                             size_t ArgSize) {
-  return shared::WrapperFunction<
-             rt::SPSSimpleExecutorMemoryManagerFinalizeSignature>::
-      handle(ArgData, ArgSize,
-             shared::makeMethodWrapperHandler(
-                 &SimpleExecutorMemoryManager::finalize))
-          .release();
+void SimpleExecutorMemoryManager::reserveWrapper(const char *ArgData,
+                                                 size_t ArgSize,
+                                                 void *SessionCtx,
+                                                 uintptr_t MsgCtx,
+                                                 CYieldFn Yield) {
+  WrapperFunction<rt::SPSSimpleExecutorMemoryManagerReserveSignature>::
+      handleAsyncWithSync(
+          ArgData, ArgSize, CYield(SessionCtx, MsgCtx, Yield),
+          makeMethodWrapperHandler(&SimpleExecutorMemoryManager::allocate));
 }
 
-llvm::orc::shared::CWrapperFunctionResult
-SimpleExecutorMemoryManager::deallocateWrapper(const char *ArgData,
-                                               size_t ArgSize) {
-  return shared::WrapperFunction<
-             rt::SPSSimpleExecutorMemoryManagerDeallocateSignature>::
-      handle(ArgData, ArgSize,
-             shared::makeMethodWrapperHandler(
-                 &SimpleExecutorMemoryManager::deallocate))
-          .release();
+void SimpleExecutorMemoryManager::finalizeWrapper(const char *ArgData,
+                                                  size_t ArgSize,
+                                                  void *SessionCtx,
+                                                  uintptr_t MsgCtx,
+                                                  CYieldFn Yield) {
+  WrapperFunction<rt::SPSSimpleExecutorMemoryManagerFinalizeSignature>::
+      handleAsync(ArgData, ArgSize, CYield(SessionCtx, MsgCtx, Yield),
+                  makeAsyncMethodWrapperHandler(
+                      &SimpleExecutorMemoryManager::finalize));
+}
+
+void SimpleExecutorMemoryManager::deallocateWrapper(const char *ArgData,
+                                                    size_t ArgSize,
+                                                    void *SessionCtx,
+                                                    uintptr_t MsgCtx,
+                                                    CYieldFn Yield) {
+  WrapperFunction<rt::SPSSimpleExecutorMemoryManagerDeallocateSignature>::
+      handleAsync(ArgData, ArgSize, CYield(SessionCtx, MsgCtx, Yield),
+                  makeAsyncMethodWrapperHandler(
+                      &SimpleExecutorMemoryManager::deallocate));
 }
 
 } // namespace rt_bootstrap

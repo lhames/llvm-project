@@ -8,6 +8,7 @@
 
 #include "llvm/ExecutionEngine/Orc/TargetProcess/JITLoaderGDB.h"
 
+#include "llvm/ADT/FunctionExtras.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/FormatVariadic.h"
 
@@ -74,34 +75,37 @@ static void appendJITDebugDescriptor(const char *ObjAddr, size_t Size) {
   __jit_debug_descriptor.action_flag = JIT_REGISTER_FN;
 }
 
-extern "C" orc::shared::CWrapperFunctionResult
-llvm_orc_registerJITLoaderGDBAllocAction(const char *ArgData, size_t ArgSize) {
-  using namespace orc::shared;
-  return WrapperFunction<SPSError(SPSExecutorAddrRange, bool)>::handle(
-             ArgData, ArgSize,
-             [](ExecutorAddrRange R, bool AutoRegisterCode) {
-               appendJITDebugDescriptor(R.Start.toPtr<const char *>(),
-                                        R.size());
-               // Run into the rendezvous breakpoint.
-               if (AutoRegisterCode)
-                 __jit_debug_register_code();
-               return Error::success();
-             })
-      .release();
+extern "C" void
+llvm_orc_registerJITLoaderGDBAllocAction(const char *Data, size_t Size,
+                                         void *SessionCtx, uintptr_t MsgCtx,
+                                         shared::CYieldFn Yield) {
+  using namespace shared;
+  WrapperFunction<SPSError(SPSExecutorAddrRange, bool)>::handleAsync(
+      Data, Size, CYield(SessionCtx, MsgCtx, Yield),
+      [](unique_function<void(Error)> SendResult, ExecutorAddrRange R,
+         bool AutoRegisterCode) {
+        appendJITDebugDescriptor(R.Start.toPtr<const char *>(), R.size());
+        // Run into the rendezvous breakpoint.
+        if (AutoRegisterCode)
+          __jit_debug_register_code();
+        SendResult(Error::success());
+      });
 }
 
-extern "C" orc::shared::CWrapperFunctionResult
-llvm_orc_registerJITLoaderGDBWrapper(const char *ArgData, size_t ArgSize) {
-  using namespace orc::shared;
-  return WrapperFunction<SPSError(SPSExecutorAddrRange, bool)>::handle(
-             ArgData, ArgSize,
-             [](ExecutorAddrRange R, bool AutoRegisterCode) {
-               appendJITDebugDescriptor(R.Start.toPtr<const char *>(),
-                                        R.size());
-               // Run into the rendezvous breakpoint.
-               if (AutoRegisterCode)
-                 __jit_debug_register_code();
-               return Error::success();
-             })
-      .release();
+extern "C" void llvm_orc_registerJITLoaderGDBWrapper(const char *Data,
+                                                     size_t Size,
+                                                     void *SessionCtx,
+                                                     uintptr_t MsgCtx,
+                                                     shared::CYieldFn Yield) {
+  using namespace shared;
+  WrapperFunction<SPSError(SPSExecutorAddrRange, bool)>::handleAsync(
+      Data, Size, CYield(SessionCtx, MsgCtx, Yield),
+      [](unique_function<void(Error)> SendResult, ExecutorAddrRange R,
+         bool AutoRegisterCode) {
+        appendJITDebugDescriptor(R.Start.toPtr<const char *>(), R.size());
+        // Run into the rendezvous breakpoint.
+        if (AutoRegisterCode)
+          __jit_debug_register_code();
+        SendResult(Error::success());
+      });
 }

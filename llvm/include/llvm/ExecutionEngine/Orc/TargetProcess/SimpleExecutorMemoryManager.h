@@ -34,8 +34,10 @@ public:
   virtual ~SimpleExecutorMemoryManager();
 
   Expected<ExecutorAddr> allocate(uint64_t Size);
-  Error finalize(tpctypes::FinalizeRequest &FR);
-  Error deallocate(const std::vector<ExecutorAddr> &Bases);
+  void finalize(unique_function<void(Error)> OnComplete,
+                tpctypes::FinalizeRequest FR);
+  void deallocate(unique_function<void(Error)> OnComplete,
+                  const std::vector<ExecutorAddr> Bases);
 
   Error shutdown() override;
   void addBootstrapSymbols(StringMap<ExecutorAddr> &M) override;
@@ -43,21 +45,30 @@ public:
 private:
   struct Allocation {
     size_t Size = 0;
-    std::vector<shared::WrapperFunctionCall> DeallocationActions;
+    std::vector<shared::WrapperFunctionCall> DeallocActions;
   };
 
   using AllocationsMap = DenseMap<void *, Allocation>;
 
-  Error deallocateImpl(void *Base, Allocation &A);
+  Error
+  recordFinalizedAlloc(ExecutorAddrRange R,
+                       std::vector<shared::WrapperFunctionCall> DeallocActions);
 
-  static llvm::orc::shared::CWrapperFunctionResult
-  reserveWrapper(const char *ArgData, size_t ArgSize);
+  void deallocateSeq(unique_function<void(Error)> OnComplete,
+                     std::vector<std::pair<void *, Allocation>> Allocs,
+                     Error Err);
 
-  static llvm::orc::shared::CWrapperFunctionResult
-  finalizeWrapper(const char *ArgData, size_t ArgSize);
+  static void reserveWrapper(const char *ArgData, size_t ArgSize,
+                             void *SessionCtx, uintptr_t MsgCtx,
+                             llvm::orc::shared::CYieldFn Yield);
 
-  static llvm::orc::shared::CWrapperFunctionResult
-  deallocateWrapper(const char *ArgData, size_t ArgSize);
+  static void finalizeWrapper(const char *ArgData, size_t ArgSize,
+                              void *SessionCtx, uintptr_t MsgCtx,
+                              llvm::orc::shared::CYieldFn Yield);
+
+  static void deallocateWrapper(const char *ArgData, size_t ArgSize,
+                                void *SessionCtx, uintptr_t MsgCtx,
+                                llvm::orc::shared::CYieldFn Yield);
 
   std::mutex M;
   AllocationsMap Allocations;

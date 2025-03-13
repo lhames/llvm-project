@@ -73,38 +73,86 @@ private:
   int32_t X;
 };
 
-static WrapperFunctionResult voidNoopWrapper(const char *ArgData,
-                                             size_t ArgSize) {
-  return WrapperFunction<void()>::handle(ArgData, ArgSize, voidNoop);
+template <typename FnT> class SimpleCaller {
+  using YieldT = unique_function<void(CWrapperFunctionResult R)>;
+
+public:
+  SimpleCaller(FnT &&Fn) : Fn(std::move(Fn)) {}
+
+  void operator()(YieldT Yield, const char *ArgData, size_t ArgSize) {
+    Fn(ArgData, ArgSize, new YieldT(std::move(Yield)), 0, simpleYield);
+  }
+
+private:
+  static void simpleYield(void *SessionCtx, uintptr_t MsgCtx,
+                          CWrapperFunctionResult R) {
+    auto *Tmp = static_cast<YieldT *>(SessionCtx);
+    auto Yield = std::move(*Tmp);
+    delete Tmp;
+    Yield(R);
+  }
+
+  FnT Fn;
+};
+
+template <typename FnT> SimpleCaller<FnT> makeSimpleCaller(FnT Fn) {
+  return SimpleCaller<FnT>(std::move(Fn));
 }
 
-static WrapperFunctionResult addWrapper(const char *ArgData, size_t ArgSize) {
-  return WrapperFunction<int32_t(int32_t, int32_t)>::handle(
-      ArgData, ArgSize, [](int32_t X, int32_t Y) -> int32_t { return X + Y; });
+static void voidNoopWrapper(const char *ArgData, size_t ArgSize,
+                            void *SessionCtx, uintptr_t MsgCtx,
+                            CYieldFn Yield) {
+  WrapperFunction<void()>::handleAsyncWithSync(
+      ArgData, ArgSize, CYield(SessionCtx, MsgCtx, Yield), voidNoop);
 }
 
-static WrapperFunctionResult addMethodWrapper(const char *ArgData,
-                                              size_t ArgSize) {
-  return WrapperFunction<int32_t(SPSExecutorAddr, int32_t)>::handle(
-      ArgData, ArgSize, makeMethodWrapperHandler(&AddClass::addMethod));
+static void addWrapper(const char *ArgData, size_t ArgSize, void *SessionCtx,
+                       uintptr_t MsgCtx, CYieldFn Yield) {
+  WrapperFunction<int32_t(int32_t, int32_t)>::handleAsyncWithSync(
+      ArgData, ArgSize, CYield(SessionCtx, MsgCtx, Yield),
+      [](int32_t X, int32_t Y) -> int32_t { return X + Y; });
+}
+
+static void addMethodWrapper(const char *ArgData, size_t ArgSize,
+                             void *SessionCtx, uintptr_t MsgCtx,
+                             CYieldFn Yield) {
+  WrapperFunction<int32_t(SPSExecutorAddr, int32_t)>::handleAsyncWithSync(
+      ArgData, ArgSize, CYield(SessionCtx, MsgCtx, Yield),
+      makeMethodWrapperHandler(&AddClass::addMethod));
 }
 
 TEST(WrapperFunctionUtilsTest, WrapperFunctionCallAndHandleVoid) {
-  EXPECT_FALSE(!!WrapperFunction<void()>::call(voidNoopWrapper));
+  bool HandlerRan = false;
+  WrapperFunction<void()>::callAsync(
+      makeSimpleCaller(voidNoopWrapper), [&](Error Err) {
+        EXPECT_THAT_ERROR(std::move(Err), Succeeded());
+        HandlerRan = true;
+      });
+  EXPECT_TRUE(HandlerRan);
 }
 
 TEST(WrapperFunctionUtilsTest, WrapperFunctionCallAndHandleRet) {
-  int32_t Result;
-  EXPECT_FALSE(!!WrapperFunction<int32_t(int32_t, int32_t)>::call(
-      addWrapper, Result, 1, 2));
+  int32_t Result = 0;
+  WrapperFunction<int32_t(int32_t, int32_t)>::callAsync(
+      makeSimpleCaller(addWrapper),
+      [&](Error SerializationErr, int32_t R) {
+        EXPECT_THAT_ERROR(std::move(SerializationErr), Succeeded());
+        Result = R;
+      },
+      1, 2);
   EXPECT_EQ(Result, (int32_t)3);
 }
 
 TEST(WrapperFunctionUtilsTest, WrapperFunctionMethodCallAndHandleRet) {
   int32_t Result;
   AddClass AddObj(1);
-  EXPECT_FALSE(!!WrapperFunction<int32_t(SPSExecutorAddr, int32_t)>::call(
-      addMethodWrapper, Result, ExecutorAddr::fromPtr(&AddObj), 2));
+  WrapperFunction<int32_t(SPSExecutorAddr, int32_t)>::callAsync(
+      makeSimpleCaller(addMethodWrapper),
+      [&](Error SerializationErr, int32_t R) {
+        EXPECT_THAT_ERROR(std::move(SerializationErr), Succeeded());
+        Result = R;
+      },
+      ExecutorAddr::fromPtr(&AddObj), 2);
   EXPECT_EQ(Result, (int32_t)3);
 }
 

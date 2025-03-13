@@ -249,17 +249,27 @@ Error SimpleRemoteEPCServer::handleResult(
 void SimpleRemoteEPCServer::handleCallWrapper(
     uint64_t RemoteSeqNo, ExecutorAddr TagAddr,
     SimpleRemoteEPCArgBytesVector ArgBytes) {
-  D->dispatch([this, RemoteSeqNo, TagAddr, ArgBytes = std::move(ArgBytes)]() {
-    using WrapperFnTy =
-        shared::CWrapperFunctionResult (*)(const char *, size_t);
-    auto *Fn = TagAddr.toPtr<WrapperFnTy>();
-    shared::WrapperFunctionResult ResultBytes(
-        Fn(ArgBytes.data(), ArgBytes.size()));
-    if (auto Err = sendMessage(SimpleRemoteEPCOpcode::Result, RemoteSeqNo,
-                               ExecutorAddr(),
-                               {ResultBytes.data(), ResultBytes.size()}))
-      ReportError(std::move(Err));
-  });
+  using AsyncWrapperYieldFn = void (*)(void *, size_t, CWrapperFunctionResult);
+  using WrapperFnTy =
+      void (*)(const char *, size_t, void *, uintptr_t, AsyncWrapperYieldFn);
+  auto *Fn = TagAddr.toPtr<WrapperFnTy>();
+  Fn(ArgBytes.data(), ArgBytes.size(), reinterpret_cast<void *>(this),
+     static_cast<uintptr_t>(RemoteSeqNo), &sendCallWrapperResult);
+}
+
+void SimpleRemoteEPCServer::sendCallWrapperResult(
+    void *Ctx, uintptr_t SeqNo, shared::CWrapperFunctionResult CResult) {
+  auto This = reinterpret_cast<SimpleRemoteEPCServer *>(Ctx);
+  WrapperFunctionResult R(CResult);
+
+  if (const char *ErrMsg = R.getOutOfBandError())
+    return This->ReportError(
+        make_error<StringError>(ErrMsg, inconvertibleErrorCode()));
+
+  if (auto Err = This->sendMessage(SimpleRemoteEPCOpcode::Result,
+                                   static_cast<uint64_t>(SeqNo), ExecutorAddr(),
+                                   {R.data(), R.size()}))
+    This->ReportError(std::move(Err));
 }
 
 shared::WrapperFunctionResult

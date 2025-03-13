@@ -159,8 +159,11 @@ private:
 
   Error handleResult(uint64_t SeqNo, ExecutorAddr TagAddr,
                      SimpleRemoteEPCArgBytesVector ArgBytes);
-  void handleCallWrapper(uint64_t RemoteSeqNo, ExecutorAddr TagAddr,
+  void handleCallWrapper(uint64_t SeqNo, ExecutorAddr TagAddr,
                          SimpleRemoteEPCArgBytesVector ArgBytes);
+
+  static void sendCallWrapperResult(void *This, uintptr_t SeqNo,
+                                    shared::CWrapperFunctionResult CResult);
 
   shared::WrapperFunctionResult
   doJITDispatch(const void *FnTag, const char *ArgData, size_t ArgSize);

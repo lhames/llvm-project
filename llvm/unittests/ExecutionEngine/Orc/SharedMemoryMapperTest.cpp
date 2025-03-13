@@ -21,14 +21,14 @@ using namespace llvm::orc::rt_bootstrap;
 #if (defined(LLVM_ON_UNIX) && !defined(__ANDROID__)) || defined(_WIN32)
 
 // A basic function to be used as both initializer/deinitializer
-CWrapperFunctionResult incrementWrapper(const char *ArgData, size_t ArgSize) {
-  return WrapperFunction<SPSError(SPSExecutorAddr)>::handle(
-             ArgData, ArgSize,
-             [](ExecutorAddr A) -> Error {
-               *A.toPtr<int *>() += 1;
-               return Error::success();
-             })
-      .release();
+void incrementWrapper(const char *ArgData, size_t ArgSize, void *SessionCtx,
+                      uintptr_t MsgCtx, CYieldFn Yield) {
+  WrapperFunction<SPSError(SPSExecutorAddr)>::handleAsyncWithSync(
+      ArgData, ArgSize, CYield(SessionCtx, MsgCtx, Yield),
+      [](ExecutorAddr A) -> Error {
+        *A.toPtr<int *>() += 1;
+        return Error::success();
+      });
 }
 
 TEST(SharedMemoryMapperTest, MemReserveInitializeDeinitializeRelease) {

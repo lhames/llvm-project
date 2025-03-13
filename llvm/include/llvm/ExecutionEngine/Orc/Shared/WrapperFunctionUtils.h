@@ -515,14 +515,14 @@ public:
   }
 
   /// Handle a call to a wrapper function.
-  template <typename HandlerT>
-  static WrapperFunctionResult handle(const char *ArgData, size_t ArgSize,
-                                      HandlerT &&Handler) {
-    using WFHH =
-        detail::WrapperFunctionHandlerHelper<std::remove_reference_t<HandlerT>,
-                                             ResultSerializer, SPSTagTs...>;
-    return WFHH::apply(std::forward<HandlerT>(Handler), ArgData, ArgSize);
-  }
+  // template <typename HandlerT>
+  // static WrapperFunctionResult handle(const char *ArgData, size_t ArgSize,
+  //                                     HandlerT &&Handler) {
+  //   using WFHH =
+  //       detail::WrapperFunctionHandlerHelper<std::remove_reference_t<HandlerT>,
+  //                                            ResultSerializer, SPSTagTs...>;
+  //   return WFHH::apply(std::forward<HandlerT>(Handler), ArgData, ArgSize);
+  // }
 
   /// Handle a call to an async wrapper function.
   template <typename HandlerT, typename SendResultT>
@@ -532,6 +532,18 @@ public:
         std::remove_reference_t<HandlerT>, ResultSerializer, SPSTagTs...>;
     WFAHH::applyAsync(std::forward<HandlerT>(Handler),
                       std::forward<SendResultT>(SendResult), ArgData, ArgSize);
+  }
+
+  /// Handle a call to an async wrapper function using a synchronous
+  /// implementation.
+  template <typename HandlerT, typename SendResultT>
+  static void handleAsyncWithSync(const char *ArgData, size_t ArgSize,
+                                  SendResultT &&SendResult,
+                                  HandlerT &&Handler) {
+    using WFHH =
+        detail::WrapperFunctionHandlerHelper<std::remove_reference_t<HandlerT>,
+                                             ResultSerializer, SPSTagTs...>;
+    SendResult(WFHH::apply(std::forward<HandlerT>(Handler), ArgData, ArgSize));
   }
 
 private:
@@ -574,8 +586,9 @@ public:
         Args...);
   }
 
-  using WrapperFunction<SPSEmpty(SPSTagTs...)>::handle;
+  // using WrapperFunction<SPSEmpty(SPSTagTs...)>::handle;
   using WrapperFunction<SPSEmpty(SPSTagTs...)>::handleAsync;
+  using WrapperFunction<SPSEmpty(SPSTagTs...)>::handleAsyncWithSync;
 };
 
 /// A function object that takes an ExecutorAddr as its first argument,
@@ -620,6 +633,62 @@ makeMethodWrapperHandler(RetT (ClassT::*Method)(ArgTs...)) {
   return MethodWrapperHandler<RetT, ClassT, ArgTs...>(Method);
 }
 
+/// A function object that takes a result handler callback as its first
+/// argument, and an ExecutorAddr as its second argument. The addr argument is
+/// cast to a ClassT*, then the method is called passing the result handler as
+/// the first argument, followed by the remaining function arguments.
+///
+/// This utility removes some of the boilerplate from writing wrappers for async
+/// method calls.
+///
+///   @code{.cpp}
+///   class MyClass {
+///   public:
+///     void myAsyncMethod(unique_function<void(std::string)> OnComplete,
+///                        uint32_t Arg1, bool Arg2) { ... }
+///   };
+///
+///   // SPS Method signature -- note MyClass object address as first argument.
+///   using SPSMyMethodWrapperSignature =
+///     SPString(SPSExecutorAddr, uint32_t, bool);
+///
+///   void myAsyncMethodCallWrapper(const char *ArgData, size_t ArgSize,
+///                                 void *SessionCtx, uintptr_t MsgCtx,
+///                                 CAsyncWrapperYieldFn Yield) {
+///     return WrapperFunction<SPSMyMethodWrapperSignature>::handleAsync(
+///        ArgData, ArgSize,
+///        CAsyncWrapperYield(SessionCtx, MsgCtx, Yield),
+///        makeAsyncMethodWrapperHandler(&MyClass::myAsyncMethod));
+///   }
+///   @endcode
+///
+template <typename SenderT, typename ClassT, typename... ArgTs>
+class AsyncMethodWrapperHandler {
+public:
+  using MethodT = void (ClassT::*)(SenderT, ArgTs...);
+  AsyncMethodWrapperHandler(MethodT M) : M(M) {}
+  void operator()(SenderT &&Sender, ExecutorAddr ObjAddr, ArgTs &&...Args) {
+    return (ObjAddr.toPtr<ClassT *>()->*M)(std::forward<SenderT>(Sender),
+                                           std::forward<ArgTs>(Args)...);
+  }
+
+private:
+  MethodT M;
+};
+
+template <typename SenderT, typename ClassT, typename... ArgTs>
+AsyncMethodWrapperHandler<SenderT, ClassT, ArgTs...>
+makeAsyncMethodWrapperHandler(void (ClassT::*Method)(SenderT, ArgTs...)) {
+  return AsyncMethodWrapperHandler<SenderT, ClassT, ArgTs...>(Method);
+}
+
+using CYieldFn = void (*)(void *SessionCtx, uintptr_t MsgCtx,
+                          CWrapperFunctionResult R);
+
+using CAsyncWrapperFn = void(const char *ArgData, size_t ArgSize,
+                             void *SessionCtx, uintptr_t MsgCtx,
+                             CYieldFn Yield);
+
 /// Represents a serialized wrapper function call.
 /// Serializing calls themselves allows us to batch them: We can make one
 /// "run-wrapper-functions" utility and send it a list of calls to run.
@@ -662,44 +731,10 @@ public:
   /// WrapperFunctionCalls convert to true if the callee is non-null.
   explicit operator bool() const { return !!FnAddr; }
 
-  /// Run call returning raw WrapperFunctionResult.
-  shared::WrapperFunctionResult run() const {
-    using FnTy =
-        shared::CWrapperFunctionResult(const char *ArgData, size_t ArgSize);
-    return shared::WrapperFunctionResult(
-        FnAddr.toPtr<FnTy *>()(ArgData.data(), ArgData.size()));
-  }
-
-  /// Run call and deserialize result using SPS.
-  template <typename SPSRetT, typename RetT>
-  std::enable_if_t<!std::is_same<SPSRetT, void>::value, Error>
-  runWithSPSRet(RetT &RetVal) const {
-    auto WFR = run();
-    if (const char *ErrMsg = WFR.getOutOfBandError())
-      return make_error<StringError>(ErrMsg, inconvertibleErrorCode());
-    shared::SPSInputBuffer IB(WFR.data(), WFR.size());
-    if (!shared::SPSSerializationTraits<SPSRetT, RetT>::deserialize(IB, RetVal))
-      return make_error<StringError>("Could not deserialize result from "
-                                     "serialized wrapper function call",
-                                     inconvertibleErrorCode());
-    return Error::success();
-  }
-
-  /// Overload for SPS functions returning void.
-  template <typename SPSRetT>
-  std::enable_if_t<std::is_same<SPSRetT, void>::value, Error>
-  runWithSPSRet() const {
-    shared::SPSEmpty E;
-    return runWithSPSRet<shared::SPSEmpty>(E);
-  }
-
-  /// Run call and deserialize an SPSError result. SPSError returns and
-  /// deserialization failures are merged into the returned error.
-  Error runWithSPSRetErrorMerged() const {
-    detail::SPSSerializableError RetErr;
-    if (auto Err = runWithSPSRet<SPSError>(RetErr))
-      return Err;
-    return detail::fromSPSSerializable(std::move(RetErr));
+  /// Run async call returning raw WrapperFunctionResult.
+  void run(void *SessionCtx, uintptr_t MsgCtx, CYieldFn Yield) const {
+    FnAddr.toPtr<CAsyncWrapperFn>()(ArgData.data(), ArgData.size(), SessionCtx,
+                                    MsgCtx, Yield);
   }
 
 private:
@@ -730,6 +765,70 @@ public:
     WFC = WrapperFunctionCall(FnAddr, std::move(ArgData));
     return true;
   }
+};
+
+/// Helper utility for yielding results using handleAsync.
+///
+/// Wraps the "yield" arguments to a C async wrapper to provide a result-sender
+/// that can be used with WrapperFunction::handleAsync.
+///
+/// Usage:
+///
+///   @code{.cpp}
+///   extern "C" void my_c_async_wrapper(
+///       const char *ArgData, size_t ArgSize,
+///       void *SessionCtx, uintptr_t MsgCtx,
+///       void (*SendResult)(void *SessionCtx, uintptr_t MsgCtx,
+///                          CWrapperFunctionResult Result)) {
+///     using SPSSig = ...;
+///     WrapperFunction<SPSSig>::handleAsync(
+///         ArgData, ArgSize, CYield(SessionCtx, MsgCtx, SendResult));
+///         [](unique_function<void(ResultT)> SendResult, ArgTs... Args) {
+///           ...
+///         });
+///   }
+///   @endcode
+///
+class CYield {
+public:
+  CYield(void *SessionCtx, uintptr_t MsgCtx, CYieldFn Yield)
+      : SessionCtx(SessionCtx), MsgCtx(MsgCtx), Yield(Yield) {}
+
+  CYield(CYield &&Other) {
+    std::swap(SessionCtx, Other.SessionCtx);
+    std::swap(MsgCtx, Other.MsgCtx);
+    std::swap(Yield, Other.Yield);
+  }
+
+  CYield &operator=(CYield &&Other) {
+    SessionCtx = Other.SessionCtx;
+    MsgCtx = Other.MsgCtx;
+    Yield = Other.Yield;
+    Other.Yield = nullptr;
+    return *this;
+  }
+
+  ~CYield() {
+    if (Yield) {
+      std::string ErrMsg;
+      raw_string_ostream(ErrMsg)
+          << "Async result sender (session = " << SessionCtx
+          << ", message = " << reinterpret_cast<void *>(MsgCtx)
+          << ") destroyed without receiving result";
+      Yield(SessionCtx, MsgCtx,
+            WrapperFunctionResult::createOutOfBandError(ErrMsg.c_str())
+                .release());
+    }
+  }
+  void operator()(WrapperFunctionResult R) {
+    Yield(SessionCtx, MsgCtx, R.release());
+    Yield = nullptr;
+  }
+
+private:
+  void *SessionCtx = nullptr;
+  uintptr_t MsgCtx = 0;
+  CYieldFn Yield = nullptr;
 };
 
 } // end namespace shared

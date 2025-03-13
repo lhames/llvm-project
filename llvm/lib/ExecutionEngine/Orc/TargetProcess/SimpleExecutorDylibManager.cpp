@@ -12,6 +12,8 @@
 
 #define DEBUG_TYPE "orc"
 
+using namespace llvm::orc::shared;
+
 namespace llvm {
 namespace orc {
 namespace rt_bootstrap {
@@ -98,24 +100,23 @@ void SimpleExecutorDylibManager::addBootstrapSymbols(
       ExecutorAddr::fromPtr(&lookupWrapper);
 }
 
-llvm::orc::shared::CWrapperFunctionResult
-SimpleExecutorDylibManager::openWrapper(const char *ArgData, size_t ArgSize) {
-  return shared::
-      WrapperFunction<rt::SPSSimpleExecutorDylibManagerOpenSignature>::handle(
-             ArgData, ArgSize,
-             shared::makeMethodWrapperHandler(
-                 &SimpleExecutorDylibManager::open))
-          .release();
+void SimpleExecutorDylibManager::openWrapper(const char *ArgData,
+                                             size_t ArgSize, void *SessionCtx,
+                                             uintptr_t MsgCtx, CYieldFn Yield) {
+  WrapperFunction<rt::SPSSimpleExecutorDylibManagerOpenSignature>::
+      handleAsyncWithSync(
+          ArgData, ArgSize, CYield(SessionCtx, MsgCtx, Yield),
+          makeMethodWrapperHandler(&SimpleExecutorDylibManager::open));
 }
 
-llvm::orc::shared::CWrapperFunctionResult
-SimpleExecutorDylibManager::lookupWrapper(const char *ArgData, size_t ArgSize) {
-  return shared::
-      WrapperFunction<rt::SPSSimpleExecutorDylibManagerLookupSignature>::handle(
-             ArgData, ArgSize,
-             shared::makeMethodWrapperHandler(
-                 &SimpleExecutorDylibManager::lookup))
-          .release();
+void SimpleExecutorDylibManager::lookupWrapper(const char *ArgData,
+                                               size_t ArgSize, void *SessionCtx,
+                                               uintptr_t MsgCtx,
+                                               CYieldFn Yield) {
+  WrapperFunction<rt::SPSSimpleExecutorDylibManagerLookupSignature>::
+      handleAsyncWithSync(
+          ArgData, ArgSize, CYield(SessionCtx, MsgCtx, Yield),
+          makeMethodWrapperHandler(&SimpleExecutorDylibManager::lookup));
 }
 
 } // namespace rt_bootstrap

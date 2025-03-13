@@ -22,71 +22,69 @@ namespace orc {
 namespace rt_bootstrap {
 
 template <typename WriteT, typename SPSWriteT>
-static llvm::orc::shared::CWrapperFunctionResult
-writeUIntsWrapper(const char *ArgData, size_t ArgSize) {
-  return WrapperFunction<void(SPSSequence<SPSWriteT>)>::handle(
-             ArgData, ArgSize,
-             [](std::vector<WriteT> Ws) {
-               for (auto &W : Ws)
-                 *W.Addr.template toPtr<decltype(W.Value) *>() = W.Value;
-             })
-      .release();
+static void writeUIntsWrapper(const char *ArgData, size_t ArgSize,
+                              void *SessionCtx, uintptr_t MsgCtx,
+                              shared::CYieldFn Yield) {
+  WrapperFunction<void(SPSSequence<SPSWriteT>)>::handleAsyncWithSync(
+      ArgData, ArgSize, CYield(SessionCtx, MsgCtx, Yield),
+      [](std::vector<WriteT> Ws) {
+        for (auto &W : Ws)
+          *W.Addr.template toPtr<decltype(W.Value) *>() = W.Value;
+      });
 }
 
-static llvm::orc::shared::CWrapperFunctionResult
-writeBuffersWrapper(const char *ArgData, size_t ArgSize) {
-  return WrapperFunction<void(SPSSequence<SPSMemoryAccessBufferWrite>)>::handle(
-             ArgData, ArgSize,
-             [](std::vector<tpctypes::BufferWrite> Ws) {
-               for (auto &W : Ws)
-                 memcpy(W.Addr.template toPtr<char *>(), W.Buffer.data(),
-                        W.Buffer.size());
-             })
-      .release();
+static void writeBuffersWrapper(const char *ArgData, size_t ArgSize,
+                                void *SessionCtx, uintptr_t MsgCtx,
+                                shared::CYieldFn Yield) {
+  WrapperFunction<void(SPSSequence<SPSMemoryAccessBufferWrite>)>::
+      handleAsyncWithSync(ArgData, ArgSize, CYield(SessionCtx, MsgCtx, Yield),
+                          [](std::vector<tpctypes::BufferWrite> Ws) {
+                            for (auto &W : Ws)
+                              memcpy(W.Addr.template toPtr<char *>(),
+                                     W.Buffer.data(), W.Buffer.size());
+                          });
 }
 
-static llvm::orc::shared::CWrapperFunctionResult
-writePointersWrapper(const char *ArgData, size_t ArgSize) {
-  return WrapperFunction<void(SPSSequence<SPSMemoryAccessPointerWrite>)>::
-      handle(ArgData, ArgSize,
-             [](std::vector<tpctypes::PointerWrite> Ws) {
-               for (auto &W : Ws)
-                 *W.Addr.template toPtr<void **>() =
-                     W.Value.template toPtr<void *>();
-             })
-          .release();
+static void writePointersWrapper(const char *ArgData, size_t ArgSize,
+                                 void *SessionCtx, uintptr_t MsgCtx,
+                                 shared::CYieldFn Yield) {
+  WrapperFunction<void(SPSSequence<SPSMemoryAccessPointerWrite>)>::
+      handleAsyncWithSync(ArgData, ArgSize, CYield(SessionCtx, MsgCtx, Yield),
+                          [](std::vector<tpctypes::PointerWrite> Ws) {
+                            for (auto &W : Ws)
+                              *W.Addr.template toPtr<void **>() =
+                                  W.Value.template toPtr<void *>();
+                          });
 }
 
-static llvm::orc::shared::CWrapperFunctionResult
-runAsMainWrapper(const char *ArgData, size_t ArgSize) {
-  return WrapperFunction<rt::SPSRunAsMainSignature>::handle(
-             ArgData, ArgSize,
-             [](ExecutorAddr MainAddr,
-                std::vector<std::string> Args) -> int64_t {
-               return runAsMain(MainAddr.toPtr<int (*)(int, char *[])>(), Args);
-             })
-      .release();
+static void runAsMainWrapper(const char *ArgData, size_t ArgSize,
+                             void *SessionCtx, uintptr_t MsgCtx,
+                             shared::CYieldFn Yield) {
+  WrapperFunction<rt::SPSRunAsMainSignature>::handleAsyncWithSync(
+      ArgData, ArgSize, CYield(SessionCtx, MsgCtx, Yield),
+      [](ExecutorAddr MainAddr, std::vector<std::string> Args) -> int64_t {
+        return runAsMain(MainAddr.toPtr<int (*)(int, char *[])>(), Args);
+      });
 }
 
-static llvm::orc::shared::CWrapperFunctionResult
-runAsVoidFunctionWrapper(const char *ArgData, size_t ArgSize) {
-  return WrapperFunction<rt::SPSRunAsVoidFunctionSignature>::handle(
-             ArgData, ArgSize,
-             [](ExecutorAddr MainAddr) -> int32_t {
-               return runAsVoidFunction(MainAddr.toPtr<int32_t (*)(void)>());
-             })
-      .release();
+static void runAsVoidFunctionWrapper(const char *ArgData, size_t ArgSize,
+                                     void *SessionCtx, uintptr_t MsgCtx,
+                                     shared::CYieldFn Yield) {
+  WrapperFunction<rt::SPSRunAsVoidFunctionSignature>::handleAsyncWithSync(
+      ArgData, ArgSize, CYield(SessionCtx, MsgCtx, Yield),
+      [](ExecutorAddr MainAddr) -> int32_t {
+        return runAsVoidFunction(MainAddr.toPtr<int32_t (*)(void)>());
+      });
 }
 
-static llvm::orc::shared::CWrapperFunctionResult
-runAsIntFunctionWrapper(const char *ArgData, size_t ArgSize) {
-  return WrapperFunction<rt::SPSRunAsIntFunctionSignature>::handle(
-             ArgData, ArgSize,
-             [](ExecutorAddr MainAddr, int32_t Arg) -> int32_t {
-               return runAsIntFunction(MainAddr.toPtr<int32_t (*)(int32_t)>(),
-                                       Arg);
-             })
-      .release();
+static void runAsIntFunctionWrapper(const char *ArgData, size_t ArgSize,
+                                    void *SessionCtx, uintptr_t MsgCtx,
+                                    shared::CYieldFn Yield) {
+  WrapperFunction<rt::SPSRunAsIntFunctionSignature>::handleAsyncWithSync(
+      ArgData, ArgSize, CYield(SessionCtx, MsgCtx, Yield),
+      [](ExecutorAddr MainAddr, int32_t Arg) -> int32_t {
+        return runAsIntFunction(MainAddr.toPtr<int32_t (*)(int32_t)>(), Arg);
+      });
 }
 
 void addTo(StringMap<ExecutorAddr> &M) {

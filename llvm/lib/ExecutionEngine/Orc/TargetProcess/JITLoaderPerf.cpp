@@ -395,28 +395,36 @@ static Error registerJITLoaderPerfEndImpl() {
   return Error::success();
 }
 
-extern "C" llvm::orc::shared::CWrapperFunctionResult
-llvm_orc_registerJITLoaderPerfImpl(const char *ArgData, size_t ArgSize) {
-  using namespace orc::shared;
-  return WrapperFunction<SPSError(SPSPerfJITRecordBatch)>::handle(
-             ArgData, ArgSize, registerJITLoaderPerfImpl)
-      .release();
+extern "C" void llvm_orc_registerJITLoaderPerfImpl(const char *Data,
+                                                   size_t Size,
+                                                   void *SessionCtx,
+                                                   uintptr_t MsgCtx,
+                                                   shared::CYieldFn Yield) {
+  using namespace shared;
+  WrapperFunction<SPSError(SPSPerfJITRecordBatch)>::handleAsyncWithSync(
+      Data, Size, CAsyncWrapperResultSender(SessionCtx, MsgCtx, SendResult),
+      registerJITLoaderPerfImpl);
 }
 
-extern "C" llvm::orc::shared::CWrapperFunctionResult
-llvm_orc_registerJITLoaderPerfStart(const char *ArgData, size_t ArgSize) {
-  using namespace orc::shared;
-  return WrapperFunction<SPSError()>::handle(ArgData, ArgSize,
-                                             registerJITLoaderPerfStartImpl)
-      .release();
+extern "C" void llvm_orc_registerJITLoaderPerfStart(const char *Data,
+                                                    size_t Size,
+                                                    void *SessionCtx,
+                                                    uintptr_t MsgCtx,
+                                                    shared::CYieldFn Yield) {
+  using namespace shared;
+  return WrapperFunction<SPSError()>::handleAsyncWithSync(
+      Data, Size, CYield(SessionCtx, MsgCtx, Yield),
+      registerJITLoaderPerfStartImpl);
 }
 
-extern "C" llvm::orc::shared::CWrapperFunctionResult
-llvm_orc_registerJITLoaderPerfEnd(const char *ArgData, size_t ArgSize) {
-  using namespace orc::shared;
-  return WrapperFunction<SPSError()>::handle(ArgData, ArgSize,
-                                             registerJITLoaderPerfEndImpl)
-      .release();
+extern "C" void llvm_orc_registerJITLoaderPerfEnd(const char *Data, size_t Size,
+                                                  void *SessionCtx,
+                                                  uintptr_t MsgCtx,
+                                                  shared::CYieldFn Yield) {
+  using namespace shared;
+  return WrapperFunction<SPSError()>::handleAsyncWithSync(
+      Data, Size, CYield(SessionCtx, MsgCtx, Yield),
+      registerJITLoaderPerfEndImpl);
 }
 
 #else
@@ -433,24 +441,33 @@ static Error badOS() {
 
 static Error badOSBatch(PerfJITRecordBatch &Batch) { return badOS(); }
 
-extern "C" llvm::orc::shared::CWrapperFunctionResult
-llvm_orc_registerJITLoaderPerfImpl(const char *ArgData, size_t ArgSize) {
+extern "C" void llvm_orc_registerJITLoaderPerfImpl(const char *Data,
+                                                   size_t Size,
+                                                   void *SessionCtx,
+                                                   uintptr_t MsgCtx,
+                                                   shared::CYieldFn Yield) {
   using namespace shared;
-  return WrapperFunction<SPSError(SPSPerfJITRecordBatch)>::handle(
-             ArgData, ArgSize, badOSBatch)
-      .release();
+  WrapperFunction<SPSError(SPSPerfJITRecordBatch)>::handleAsyncWithSync(
+      Data, Size, CYield(SessionCtx, MsgCtx, Yield), badOSBatch);
 }
 
-extern "C" llvm::orc::shared::CWrapperFunctionResult
-llvm_orc_registerJITLoaderPerfStart(const char *ArgData, size_t ArgSize) {
+extern "C" void llvm_orc_registerJITLoaderPerfStart(const char *Data,
+                                                    size_t Size,
+                                                    void *SessionCtx,
+                                                    uintptr_t MsgCtx,
+                                                    shared::CYieldFn Yield) {
   using namespace shared;
-  return WrapperFunction<SPSError()>::handle(ArgData, ArgSize, badOS).release();
+  WrapperFunction<SPSError()>::handleAsyncWithSync(
+      Data, Size, CYield(SessionCtx, MsgCtx, Yield), badOS);
 }
 
-extern "C" llvm::orc::shared::CWrapperFunctionResult
-llvm_orc_registerJITLoaderPerfEnd(const char *ArgData, size_t ArgSize) {
+extern "C" void llvm_orc_registerJITLoaderPerfEnd(const char *Data, size_t Size,
+                                                  void *SessionCtx,
+                                                  uintptr_t MsgCtx,
+                                                  shared::CYieldFn Yield) {
   using namespace shared;
-  return WrapperFunction<SPSError()>::handle(ArgData, ArgSize, badOS).release();
+  WrapperFunction<SPSError()>::handleAsyncWithSync(
+      Data, Size, CYield(SessionCtx, MsgCtx, Yield), badOS);
 }
 
 #endif

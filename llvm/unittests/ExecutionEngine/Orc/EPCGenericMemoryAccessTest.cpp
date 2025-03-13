@@ -18,35 +18,36 @@ using namespace llvm::orc::shared;
 namespace {
 
 template <typename WriteT, typename SPSWriteT>
-CWrapperFunctionResult testWriteUInts(const char *ArgData, size_t ArgSize) {
-  return WrapperFunction<void(SPSSequence<SPSWriteT>)>::handle(
-             ArgData, ArgSize,
-             [](std::vector<WriteT> Ws) {
-               for (auto &W : Ws)
-                 *W.Addr.template toPtr<decltype(W.Value) *>() = W.Value;
-             })
-      .release();
+void testWriteUInts(const char *ArgData, size_t ArgSize, void *SessionCtx,
+                    uintptr_t MsgCtx, CYieldFn Yield) {
+  WrapperFunction<void(SPSSequence<SPSWriteT>)>::handleAsyncWithSync(
+      ArgData, ArgSize, CYield(SessionCtx, MsgCtx, Yield),
+      [](std::vector<WriteT> Ws) {
+        for (auto &W : Ws)
+          *W.Addr.template toPtr<decltype(W.Value) *>() = W.Value;
+      });
 }
 
-CWrapperFunctionResult testWriteBuffers(const char *ArgData, size_t ArgSize) {
-  return WrapperFunction<void(SPSSequence<SPSMemoryAccessBufferWrite>)>::handle(
-             ArgData, ArgSize,
-             [](std::vector<tpctypes::BufferWrite> Ws) {
-               for (auto &W : Ws)
-                 memcpy(W.Addr.template toPtr<char *>(), W.Buffer.data(),
-                        W.Buffer.size());
-             })
-      .release();
+void testWriteBuffers(const char *ArgData, size_t ArgSize, void *SessionCtx,
+                      uintptr_t MsgCtx, CYieldFn Yield) {
+  WrapperFunction<void(SPSSequence<SPSMemoryAccessBufferWrite>)>::
+      handleAsyncWithSync(ArgData, ArgSize, CYield(SessionCtx, MsgCtx, Yield),
+                          [](std::vector<tpctypes::BufferWrite> Ws) {
+                            for (auto &W : Ws)
+                              memcpy(W.Addr.template toPtr<char *>(),
+                                     W.Buffer.data(), W.Buffer.size());
+                          });
 }
 
-CWrapperFunctionResult testWritePointers(const char *ArgData, size_t ArgSize) {
-  return WrapperFunction<void(SPSSequence<SPSMemoryAccessPointerWrite>)>::
-      handle(ArgData, ArgSize,
-             [](std::vector<tpctypes::PointerWrite> Ws) {
-               for (auto &W : Ws)
-                 *W.Addr.template toPtr<uint64_t *>() = W.Value.getValue();
-             })
-          .release();
+void testWritePointers(const char *ArgData, size_t ArgSize, void *SessionCtx,
+                       uintptr_t MsgCtx, CYieldFn Yield) {
+  WrapperFunction<void(SPSSequence<SPSMemoryAccessPointerWrite>)>::
+      handleAsyncWithSync(ArgData, ArgSize, CYield(SessionCtx, MsgCtx, Yield),
+                          [](std::vector<tpctypes::PointerWrite> Ws) {
+                            for (auto &W : Ws)
+                              *W.Addr.template toPtr<uint64_t *>() =
+                                  W.Value.getValue();
+                          });
 }
 
 TEST(EPCGenericMemoryAccessTest, MemWrites) {

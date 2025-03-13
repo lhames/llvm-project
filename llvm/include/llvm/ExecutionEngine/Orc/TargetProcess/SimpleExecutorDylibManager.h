@@ -47,11 +47,12 @@ public:
 private:
   using DylibSet = DenseSet<void *>;
 
-  static llvm::orc::shared::CWrapperFunctionResult
-  openWrapper(const char *ArgData, size_t ArgSize);
+  static void openWrapper(const char *ArgData, size_t ArgSize, void *SessionCtx,
+                          uintptr_t MsgCtx, llvm::orc::shared::CYieldFn Yield);
 
-  static llvm::orc::shared::CWrapperFunctionResult
-  lookupWrapper(const char *ArgData, size_t ArgSize);
+  static void lookupWrapper(const char *ArgData, size_t ArgSize,
+                            void *SessionCtx, uintptr_t MsgCtx,
+                            llvm::orc::shared::CYieldFn Yield);
 
   std::mutex M;
   DylibSet Dylibs;

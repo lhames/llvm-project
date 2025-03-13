@@ -142,10 +142,45 @@ SelfExecutorProcessControl::runAsIntFunction(ExecutorAddr IntFnAddr, int Arg) {
 void SelfExecutorProcessControl::callWrapperAsync(ExecutorAddr WrapperFnAddr,
                                                   IncomingWFRHandler SendResult,
                                                   ArrayRef<char> ArgBuffer) {
-  using WrapperFnTy =
-      shared::CWrapperFunctionResult (*)(const char *Data, size_t Size);
-  auto *WrapperFn = WrapperFnAddr.toPtr<WrapperFnTy>();
-  SendResult(WrapperFn(ArgBuffer.data(), ArgBuffer.size()));
+  uintptr_t CallId = 0;
+  {
+    std::lock_guard<std::mutex> Lock(M);
+    if (!AvailableIds.empty()) {
+      CallId = AvailableIds.back();
+      AvailableIds.pop_back();
+    } else
+      CallId = Pending.size();
+
+    Pending[CallId] = std::move(SendResult);
+  }
+
+  auto *WrapperFn =
+      WrapperFnAddr
+          .toPtr<void(const char *ArgData, size_t ArgSize, void *SessionCtx,
+                      uintptr_t MsgCtx, shared::CYieldFn Yield)>();
+
+  WrapperFn(ArgBuffer.data(), ArgBuffer.size(), reinterpret_cast<void *>(this),
+            CallId, onAsyncCallComplete);
+}
+
+void SelfExecutorProcessControl::onAsyncCallComplete(
+    uintptr_t MsgCtx, shared::CWrapperFunctionResult Result) {
+  IncomingWFRHandler H;
+  {
+    std::lock_guard<std::mutex> Lock(M);
+    auto I = Pending.find(MsgCtx);
+    assert(I != Pending.end() && "CallId not found in Pending map");
+    H = std::move(I->second);
+    Pending.erase(I);
+    AvailableIds.push_back(MsgCtx);
+  }
+  H(std::move(Result));
+}
+
+void SelfExecutorProcessControl::onAsyncCallComplete(
+    void *SessionCtx, uintptr_t MsgCtx, shared::CWrapperFunctionResult Result) {
+  reinterpret_cast<SelfExecutorProcessControl *>(SessionCtx)
+      ->onAsyncCallComplete(MsgCtx, std::move(Result));
 }
 
 Error SelfExecutorProcessControl::disconnect() {

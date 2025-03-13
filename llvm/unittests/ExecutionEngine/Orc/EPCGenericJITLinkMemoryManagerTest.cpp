@@ -78,26 +78,26 @@ private:
   DenseMap<void *, sys::OwningMemoryBlock> Blocks;
 };
 
-CWrapperFunctionResult testReserve(const char *ArgData, size_t ArgSize) {
-  return WrapperFunction<rt::SPSSimpleExecutorMemoryManagerReserveSignature>::
-      handle(ArgData, ArgSize,
-             makeMethodWrapperHandler(&SimpleAllocator::reserve))
-          .release();
+void testReserve(const char *ArgData, size_t ArgSize, void *SessionCtx,
+                 uintptr_t MsgCtx, CYieldFn Yield) {
+  WrapperFunction<rt::SPSSimpleExecutorMemoryManagerReserveSignature>::
+      handleAsyncWithSync(ArgData, ArgSize, CYield(SessionCtx, MsgCtx, Yield),
+                          makeMethodWrapperHandler(&SimpleAllocator::reserve));
 }
 
-CWrapperFunctionResult testFinalize(const char *ArgData, size_t ArgSize) {
-  return WrapperFunction<rt::SPSSimpleExecutorMemoryManagerFinalizeSignature>::
-      handle(ArgData, ArgSize,
-             makeMethodWrapperHandler(&SimpleAllocator::finalize))
-          .release();
+void testFinalize(const char *ArgData, size_t ArgSize, void *SessionCtx,
+                  uintptr_t MsgCtx, CYieldFn Yield) {
+  WrapperFunction<rt::SPSSimpleExecutorMemoryManagerFinalizeSignature>::
+      handleAsyncWithSync(ArgData, ArgSize, CYield(SessionCtx, MsgCtx, Yield),
+                          makeMethodWrapperHandler(&SimpleAllocator::finalize));
 }
 
-CWrapperFunctionResult testDeallocate(const char *ArgData, size_t ArgSize) {
-  return WrapperFunction<
-             rt::SPSSimpleExecutorMemoryManagerDeallocateSignature>::
-      handle(ArgData, ArgSize,
-             makeMethodWrapperHandler(&SimpleAllocator::deallocate))
-          .release();
+void testDeallocate(const char *ArgData, size_t ArgSize, void *SessionCtx,
+                    uintptr_t MsgCtx, CYieldFn Yield) {
+  WrapperFunction<rt::SPSSimpleExecutorMemoryManagerDeallocateSignature>::
+      handleAsyncWithSync(
+          ArgData, ArgSize, CYield(SessionCtx, MsgCtx, Yield),
+          makeMethodWrapperHandler(&SimpleAllocator::deallocate));
 }
 
 TEST(EPCGenericJITLinkMemoryManagerTest, AllocFinalizeFree) {

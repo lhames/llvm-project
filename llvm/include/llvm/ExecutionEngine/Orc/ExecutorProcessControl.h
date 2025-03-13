@@ -507,11 +507,20 @@ private:
   void lookupSymbolsAsync(ArrayRef<LookupRequest> Request,
                           SymbolLookupCompleteFn F) override;
 
+  void onAsyncCallComplete(uintptr_t MsgCtx,
+                           shared::CWrapperFunctionResult Result);
+  static void onAsyncCallComplete(void *SessionCtx, uintptr_t MsgCtx,
+                                  shared::CWrapperFunctionResult Result);
+
   std::unique_ptr<jitlink::JITLinkMemoryManager> OwnedMemMgr;
 #ifdef __APPLE__
   std::unique_ptr<UnwindInfoManager> UnwindInfoMgr;
 #endif // __APPLE__
   char GlobalManglingPrefix = 0;
+
+  std::mutex M;
+  std::vector<uintptr_t> AvailableIds;
+  DenseMap<uintptr_t, IncomingWFRHandler> Pending;
 };
 
 } // end namespace orc

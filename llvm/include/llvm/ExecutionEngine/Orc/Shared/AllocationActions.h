@@ -66,16 +66,16 @@ using OnRunFinalizeActionsCompleteFn =
 /// be returned. The dealloc actions should be run by calling
 /// runDeallocationActions. If this function succeeds then the AA argument will
 /// be cleared before the function returns.
-void runFinalizeActions(AllocActions &AAs,
-                        OnRunFinalizeActionsCompleteFn OnComplete);
+void runFinalizeActions(AllocActions &&AAs,
+                        OnRunFinalizeActionsCompleteFn &&OnComplete);
 
-using OnRunDeallocActionsComeleteFn = unique_function<void(Error)>;
+using OnRunDeallocActionsCompleteFn = unique_function<void(Error)>;
 
 /// Run deallocation actions.
 /// Dealloc actions will be run in reverse order (from last element of DAs to
 /// first).
-void runDeallocActions(ArrayRef<WrapperFunctionCall> DAs,
-                       OnRunDeallocActionsComeleteFn OnComplete);
+void runDeallocActions(std::vector<WrapperFunctionCall> &&DAs,
+                       OnRunDeallocActionsCompleteFn &&OnComplete);
 
 using SPSAllocActionCallPair =
     SPSTuple<SPSWrapperFunctionCall, SPSWrapperFunctionCall>;

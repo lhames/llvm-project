@@ -262,7 +262,7 @@ public:
     // Run finalization actions.
     using WrapperFunctionCall = orc::shared::WrapperFunctionCall;
     runFinalizeActions(
-        G->allocActions(),
+        std::move(G->allocActions()),
         [this, OnFinalized = std::move(OnFinalized)](
             Expected<std::vector<WrapperFunctionCall>> DeallocActions) mutable {
           completeFinalization(std::move(OnFinalized),
@@ -468,28 +468,8 @@ void InProcessMemoryManager::deallocate(std::vector<FinalizedAlloc> Allocs,
     }
   }
 
-  Error DeallocErr = Error::success();
-
-  while (!DeallocActionsList.empty()) {
-    auto &DeallocActions = DeallocActionsList.back();
-    auto &StandardSegments = StandardSegmentsList.back();
-
-    /// Run any deallocate calls.
-    while (!DeallocActions.empty()) {
-      if (auto Err = DeallocActions.back().runWithSPSRetErrorMerged())
-        DeallocErr = joinErrors(std::move(DeallocErr), std::move(Err));
-      DeallocActions.pop_back();
-    }
-
-    /// Release the standard segments slab.
-    if (auto EC = sys::Memory::releaseMappedMemory(StandardSegments))
-      DeallocErr = joinErrors(std::move(DeallocErr), errorCodeToError(EC));
-
-    DeallocActionsList.pop_back();
-    StandardSegmentsList.pop_back();
-  }
-
-  OnDeallocated(std::move(DeallocErr));
+  deallocate(std::move(DeallocActionsList), std::move(StandardSegmentsList),
+             Error::success(), std::move(OnDeallocated));
 }
 
 JITLinkMemoryManager::FinalizedAlloc
@@ -501,6 +481,41 @@ InProcessMemoryManager::createFinalizedAlloc(
   new (FA) FinalizedAllocInfo(
       {std::move(StandardSegments), std::move(DeallocActions)});
   return FinalizedAlloc(orc::ExecutorAddr::fromPtr(FA));
+}
+
+void InProcessMemoryManager::deallocate(
+    std::vector<std::vector<orc::shared::WrapperFunctionCall>> DeallocActions,
+    std::vector<sys::MemoryBlock> StandardSegmentsList, Error Err,
+    OnDeallocatedFunction OnDeallocated) {
+
+  assert(DeallocActions.size() == StandardSegmentsList.size());
+
+  if (DeallocActions.empty())
+    return OnDeallocated(std::move(Err));
+
+  auto DAs = std::move(DeallocActions.back());
+  DeallocActions.pop_back();
+
+  runDeallocActions(
+      std::move(DAs),
+      [this, DeallocActions = std::move(DeallocActions),
+       StandardSegments = std::move(StandardSegmentsList),
+       PrevErr = std::move(Err),
+       OnDeallocated = std::move(OnDeallocated)](Error Err) mutable {
+        assert(StandardSegments.size() == DeallocActions.size() + 1);
+
+        // Merge previous error and err.
+        Err = joinErrors(std::move(PrevErr), std::move(Err));
+
+        auto MB = StandardSegments.back();
+        StandardSegments.pop_back();
+        Err =
+            joinErrors(std::move(Err),
+                       errorCodeToError(sys::Memory::releaseMappedMemory(MB)));
+
+        deallocate(std::move(DeallocActions), std::move(StandardSegments),
+                   std::move(Err), std::move(OnDeallocated));
+      });
 }
 
 } // end namespace jitlink

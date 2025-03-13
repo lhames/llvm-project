@@ -20,34 +20,33 @@ using namespace llvm;
 using namespace llvm::orc;
 using namespace llvm::orc::shared;
 
-static orc::shared::CWrapperFunctionResult
-llvm_orc_rt_alt_UnwindInfoManager_register(const char *ArgData,
-                                           size_t ArgSize) {
+static void llvm_orc_rt_alt_UnwindInfoManager_register(const char *Data,
+                                                       size_t Size,
+                                                       void *SessionCtx,
+                                                       uintptr_t MsgCtx,
+                                                       CYieldFn Yield) {
   using SPSSig = SPSError(SPSSequence<SPSExecutorAddrRange>, SPSExecutorAddr,
                           SPSExecutorAddrRange, SPSExecutorAddrRange);
-
-  return WrapperFunction<SPSSig>::handle(
-             ArgData, ArgSize,
-             [](std::vector<ExecutorAddrRange> CodeRanges, ExecutorAddr DSOBase,
-                ExecutorAddrRange DWARFRange,
-                ExecutorAddrRange CompactUnwindRange) {
-               return UnwindInfoManager::registerSections(
-                   CodeRanges, DSOBase, DWARFRange, CompactUnwindRange);
-             })
-      .release();
+  WrapperFunction<SPSSig>::handleAsyncWithSync(
+      Data, Size, CYield(SessionCtx, MsgCtx, Yield),
+      [](std::vector<ExecutorAddrRange> CodeRanges, ExecutorAddr DSOBase,
+         ExecutorAddrRange DWARFRange, ExecutorAddrRange CompactUnwindRange) {
+        return UnwindInfoManager::registerSections(
+            CodeRanges, DSOBase, DWARFRange, CompactUnwindRange);
+      });
 }
 
-static orc::shared::CWrapperFunctionResult
-llvm_orc_rt_alt_UnwindInfoManager_deregister(const char *ArgData,
-                                             size_t ArgSize) {
+static void llvm_orc_rt_alt_UnwindInfoManager_deregister(const char *Data,
+                                                         size_t Size,
+                                                         void *SessionCtx,
+                                                         uintptr_t MsgCtx,
+                                                         CYieldFn Yield) {
   using SPSSig = SPSError(SPSSequence<SPSExecutorAddrRange>);
-
-  return WrapperFunction<SPSSig>::handle(
-             ArgData, ArgSize,
-             [](std::vector<ExecutorAddrRange> CodeRanges) {
-               return UnwindInfoManager::deregisterSections(CodeRanges);
-             })
-      .release();
+  return WrapperFunction<SPSSig>::handleAsyncWithSync(
+      Data, Size, CYield(SessionCtx, MsgCtx, Yield),
+      [](std::vector<ExecutorAddrRange> CodeRanges) {
+        return UnwindInfoManager::deregisterSections(CodeRanges);
+      });
 }
 
 namespace llvm::orc {

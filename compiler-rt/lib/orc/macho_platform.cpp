@@ -18,6 +18,7 @@
 #include "interval_map.h"
 #include "jit_dispatch.h"
 #include "record_section_tracker.h"
+#include "wrapper_function_call.h"
 #include "wrapper_function_utils.h"
 
 #include <algorithm>
@@ -1336,128 +1337,137 @@ void destroyMachOTLVMgr(void *MachOTLVMgr) {
   delete static_cast<MachOPlatformRuntimeTLVManager *>(MachOTLVMgr);
 }
 
-Error runWrapperFunctionCalls(std::vector<WrapperFunctionCall> WFCs) {
-  for (auto &WFC : WFCs)
-    if (auto Err = WFC.runWithSPSRet<void>())
-      return Err;
-  return Error::success();
-}
-
 } // end anonymous namespace
 
 //------------------------------------------------------------------------------
 //                             JIT entry points
 //------------------------------------------------------------------------------
 
-ORC_RT_INTERFACE orc_rt_WrapperFunctionResult
-__orc_rt_macho_platform_bootstrap(char *ArgData, size_t ArgSize) {
-  return WrapperFunction<SPSError()>::handle(
-             ArgData, ArgSize,
-             []() { return MachOPlatformRuntimeState::create(); })
-      .release();
+ORC_RT_INTERFACE void __orc_rt_macho_platform_bootstrap(char *ArgData,
+                                                        size_t ArgSize,
+                                                        void *SessionCtx,
+                                                        uintptr_t MsgCtx,
+                                                        orc_rt_YieldFn Yield) {
+  return WrapperFunction<SPSError()>::handleAsyncWithSync(
+      ArgData, ArgSize, CYield(SessionCtx, MsgCtx, Yield),
+      []() { return MachOPlatformRuntimeState::create(); });
 }
 
-ORC_RT_INTERFACE orc_rt_WrapperFunctionResult
-__orc_rt_macho_platform_shutdown(char *ArgData, size_t ArgSize) {
-  return WrapperFunction<SPSError()>::handle(
-             ArgData, ArgSize,
-             []() { return MachOPlatformRuntimeState::destroy(); })
-      .release();
+ORC_RT_INTERFACE void __orc_rt_macho_platform_shutdown(char *ArgData,
+                                                       size_t ArgSize,
+                                                       void *SessionCtx,
+                                                       uintptr_t MsgCtx,
+                                                       orc_rt_YieldFn Yield) {
+  return WrapperFunction<SPSError()>::handleAsyncWithSync(
+      ArgData, ArgSize, CYield(SessionCtx, MsgCtx, Yield),
+      []() { return MachOPlatformRuntimeState::destroy(); });
 }
 
-ORC_RT_INTERFACE orc_rt_WrapperFunctionResult
-__orc_rt_macho_register_jitdylib(char *ArgData, size_t ArgSize) {
-  return WrapperFunction<SPSError(SPSString, SPSExecutorAddr)>::handle(
-             ArgData, ArgSize,
-             [](std::string &Name, ExecutorAddr HeaderAddr) {
-               return MachOPlatformRuntimeState::get().registerJITDylib(
-                   std::move(Name), HeaderAddr.toPtr<void *>());
-             })
-      .release();
+ORC_RT_INTERFACE void __orc_rt_macho_register_jitdylib(char *ArgData,
+                                                       size_t ArgSize,
+                                                       void *SessionCtx,
+                                                       uintptr_t MsgCtx,
+                                                       orc_rt_YieldFn Yield) {
+  return WrapperFunction<SPSError(SPSString, SPSExecutorAddr)>::
+      handleAsyncWithSync(
+          ArgData, ArgSize, CYield(SessionCtx, MsgCtx, Yield),
+          [](std::string &Name, ExecutorAddr HeaderAddr) {
+            return MachOPlatformRuntimeState::get().registerJITDylib(
+                std::move(Name), HeaderAddr.toPtr<void *>());
+          });
 }
 
-ORC_RT_INTERFACE orc_rt_WrapperFunctionResult
-__orc_rt_macho_deregister_jitdylib(char *ArgData, size_t ArgSize) {
-  return WrapperFunction<SPSError(SPSExecutorAddr)>::handle(
-             ArgData, ArgSize,
-             [](ExecutorAddr HeaderAddr) {
-               return MachOPlatformRuntimeState::get().deregisterJITDylib(
-                   HeaderAddr.toPtr<void *>());
-             })
-      .release();
+ORC_RT_INTERFACE void __orc_rt_macho_deregister_jitdylib(char *ArgData,
+                                                         size_t ArgSize,
+                                                         void *SessionCtx,
+                                                         uintptr_t MsgCtx,
+                                                         orc_rt_YieldFn Yield) {
+  return WrapperFunction<SPSError(SPSExecutorAddr)>::handleAsyncWithSync(
+      ArgData, ArgSize, CYield(SessionCtx, MsgCtx, Yield),
+      [](ExecutorAddr HeaderAddr) {
+        return MachOPlatformRuntimeState::get().deregisterJITDylib(
+            HeaderAddr.toPtr<void *>());
+      });
 }
 
-ORC_RT_INTERFACE orc_rt_WrapperFunctionResult
-__orc_rt_macho_register_object_platform_sections(char *ArgData,
-                                                 size_t ArgSize) {
+ORC_RT_INTERFACE void __orc_rt_macho_register_object_platform_sections(
+    char *ArgData, size_t ArgSize, void *SessionCtx, uintptr_t MsgCtx,
+    orc_rt_YieldFn Yield) {
   return WrapperFunction<SPSError(SPSExecutorAddr,
                                   SPSOptional<SPSUnwindSectionInfo>,
                                   SPSMachOObjectPlatformSectionsMap)>::
-      handle(ArgData, ArgSize,
-             [](ExecutorAddr HeaderAddr, std::optional<UnwindSectionInfo> USI,
-                std::vector<std::pair<std::string_view, ExecutorAddrRange>>
-                    &Secs) {
-               return MachOPlatformRuntimeState::get()
-                   .registerObjectPlatformSections(HeaderAddr, std::move(USI),
-                                                   std::move(Secs));
-             })
-          .release();
+      handleAsyncWithSync(
+          ArgData, ArgSize, CYield(SessionCtx, MsgCtx, Yield),
+          [](ExecutorAddr HeaderAddr, std::optional<UnwindSectionInfo> USI,
+             std::vector<std::pair<std::string_view, ExecutorAddrRange>>
+                 &Secs) {
+            return MachOPlatformRuntimeState::get()
+                .registerObjectPlatformSections(HeaderAddr, std::move(USI),
+                                                std::move(Secs));
+          });
 }
 
-ORC_RT_INTERFACE orc_rt_WrapperFunctionResult
-__orc_rt_macho_register_object_symbol_table(char *ArgData, size_t ArgSize) {
+ORC_RT_INTERFACE void
+__orc_rt_macho_register_object_symbol_table(char *ArgData, size_t ArgSize,
+                                            void *SessionCtx, uintptr_t MsgCtx,
+                                            orc_rt_YieldFn Yield) {
   using SymtabContainer = std::vector<
       std::tuple<ExecutorAddr, ExecutorAddr,
                  MachOPlatformRuntimeState::MachOExecutorSymbolFlags>>;
   return WrapperFunction<SPSError(
       SPSExecutorAddr, SPSSequence<SPSTuple<SPSExecutorAddr, SPSExecutorAddr,
                                             SPSMachOExecutorSymbolFlags>>)>::
-      handle(ArgData, ArgSize,
-             [](ExecutorAddr HeaderAddr, SymtabContainer &Symbols) {
-               return MachOPlatformRuntimeState::get()
-                   .registerObjectSymbolTable(HeaderAddr, Symbols);
-             })
-          .release();
+      handleAsyncWithSync(
+          ArgData, ArgSize, CYield(SessionCtx, MsgCtx, Yield),
+          [](ExecutorAddr HeaderAddr, SymtabContainer &Symbols) {
+            return MachOPlatformRuntimeState::get().registerObjectSymbolTable(
+                HeaderAddr, Symbols);
+          });
 }
 
-ORC_RT_INTERFACE orc_rt_WrapperFunctionResult
-__orc_rt_macho_deregister_object_symbol_table(char *ArgData, size_t ArgSize) {
+ORC_RT_INTERFACE void __orc_rt_macho_deregister_object_symbol_table(
+    char *ArgData, size_t ArgSize, void *SessionCtx, uintptr_t MsgCtx,
+    orc_rt_YieldFn Yield) {
   using SymtabContainer = std::vector<
       std::tuple<ExecutorAddr, ExecutorAddr,
                  MachOPlatformRuntimeState::MachOExecutorSymbolFlags>>;
   return WrapperFunction<SPSError(
       SPSExecutorAddr, SPSSequence<SPSTuple<SPSExecutorAddr, SPSExecutorAddr,
                                             SPSMachOExecutorSymbolFlags>>)>::
-      handle(ArgData, ArgSize,
-             [](ExecutorAddr HeaderAddr, SymtabContainer &Symbols) {
-               return MachOPlatformRuntimeState::get()
-                   .deregisterObjectSymbolTable(HeaderAddr, Symbols);
-             })
-          .release();
+      handleAsyncWithSync(
+          ArgData, ArgSize, CYield(SessionCtx, MsgCtx, Yield),
+          [](ExecutorAddr HeaderAddr, SymtabContainer &Symbols) {
+            return MachOPlatformRuntimeState::get().deregisterObjectSymbolTable(
+                HeaderAddr, Symbols);
+          });
 }
 
-ORC_RT_INTERFACE orc_rt_WrapperFunctionResult
-__orc_rt_macho_deregister_object_platform_sections(char *ArgData,
-                                                   size_t ArgSize) {
+ORC_RT_INTERFACE void __orc_rt_macho_deregister_object_platform_sections(
+    char *ArgData, size_t ArgSize, void *SessionCtx, uintptr_t MsgCtx,
+    orc_rt_YieldFn Yield) {
   return WrapperFunction<SPSError(SPSExecutorAddr,
                                   SPSOptional<SPSUnwindSectionInfo>,
                                   SPSMachOObjectPlatformSectionsMap)>::
-      handle(ArgData, ArgSize,
-             [](ExecutorAddr HeaderAddr, std::optional<UnwindSectionInfo> USI,
-                std::vector<std::pair<std::string_view, ExecutorAddrRange>>
-                    &Secs) {
-               return MachOPlatformRuntimeState::get()
-                   .deregisterObjectPlatformSections(HeaderAddr, std::move(USI),
-                                                     std::move(Secs));
-             })
-          .release();
+      handleAsyncWithSync(
+          ArgData, ArgSize, CYield(SessionCtx, MsgCtx, Yield),
+          [](ExecutorAddr HeaderAddr, std::optional<UnwindSectionInfo> USI,
+             std::vector<std::pair<std::string_view, ExecutorAddrRange>>
+                 &Secs) {
+            return MachOPlatformRuntimeState::get()
+                .deregisterObjectPlatformSections(HeaderAddr, std::move(USI),
+                                                  std::move(Secs));
+          });
 }
 
-ORC_RT_INTERFACE orc_rt_WrapperFunctionResult
-__orc_rt_macho_run_wrapper_function_calls(char *ArgData, size_t ArgSize) {
-  return WrapperFunction<SPSError(SPSSequence<SPSWrapperFunctionCall>)>::handle(
-             ArgData, ArgSize, runWrapperFunctionCalls)
-      .release();
+ORC_RT_INTERFACE void
+__orc_rt_macho_run_wrapper_function_calls(char *ArgData, size_t ArgSize,
+                                          void *SessionCtx, uintptr_t MsgCtx,
+                                          orc_rt_YieldFn Yield) {
+  return WrapperFunction<SPSError(
+      SPSSequence<SPSWrapperFunctionCall>)>::handleAsync(ArgData, ArgSize,
+                                                         CYield(SessionCtx,
+                                                                MsgCtx, Yield),
+                                                         runErrorWFCSequence);
 }
 
 //------------------------------------------------------------------------------
@@ -1479,19 +1489,21 @@ ORC_RT_INTERFACE void *__orc_rt_macho_tlv_get_addr_impl(TLVDescriptor *D) {
       reinterpret_cast<char *>(static_cast<uintptr_t>(D->DataAddress)));
 }
 
-ORC_RT_INTERFACE orc_rt_WrapperFunctionResult
-__orc_rt_macho_create_pthread_key(char *ArgData, size_t ArgSize) {
-  return WrapperFunction<SPSExpected<uint64_t>(void)>::handle(
-             ArgData, ArgSize,
-             []() -> Expected<uint64_t> {
-               pthread_key_t Key;
-               if (int Err = pthread_key_create(&Key, destroyMachOTLVMgr)) {
-                 __orc_rt_log_error("Call to pthread_key_create failed");
-                 return make_error<StringError>(strerror(Err));
-               }
-               return static_cast<uint64_t>(Key);
-             })
-      .release();
+ORC_RT_INTERFACE void __orc_rt_macho_create_pthread_key(char *ArgData,
+                                                        size_t ArgSize,
+                                                        void *SessionCtx,
+                                                        uintptr_t MsgCtx,
+                                                        orc_rt_YieldFn Yield) {
+  return WrapperFunction<SPSExpected<uint64_t>(void)>::handleAsyncWithSync(
+      ArgData, ArgSize, CYield(SessionCtx, MsgCtx, Yield),
+      []() -> Expected<uint64_t> {
+        pthread_key_t Key;
+        if (int Err = pthread_key_create(&Key, destroyMachOTLVMgr)) {
+          __orc_rt_log_error("Call to pthread_key_create failed");
+          return make_error<StringError>(strerror(Err));
+        }
+        return static_cast<uint64_t>(Key);
+      });
 }
 
 //------------------------------------------------------------------------------

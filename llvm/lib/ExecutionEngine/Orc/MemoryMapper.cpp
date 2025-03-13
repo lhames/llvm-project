@@ -95,7 +95,8 @@ void InProcessMemoryMapper::initialize(MemoryMapper::AllocInfo &AI,
     std::promise<MSVCPExpected<std::vector<shared::WrapperFunctionCall>>> P;
     auto F = P.get_future();
     shared::runFinalizeActions(
-        AI.Actions, [&](Expected<std::vector<shared::WrapperFunctionCall>> R) {
+        std::move(AI.Actions),
+        [&](Expected<std::vector<shared::WrapperFunctionCall>> R) {
           P.set_value(std::move(R));
         });
     if (auto DeinitializeActionsOrErr = F.get())
@@ -128,7 +129,7 @@ void InProcessMemoryMapper::deinitialize(
     for (auto Base : llvm::reverse(Bases)) {
 
       shared::runDeallocActions(
-          Allocations[Base].DeinitializationActions, [&](Error Err) {
+          std::move(Allocations[Base].DeinitializationActions), [&](Error Err) {
             AllErr = joinErrors(std::move(AllErr), std::move(Err));
           });
 
