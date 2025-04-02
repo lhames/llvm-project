@@ -13,6 +13,7 @@ if( LLVM_USE_INTEL_JITEVENTS )
 endif()
 
 add_llvm_component_library(LLVMOrcTargetProcess
+  ExecutorResolver.cpp
   ExecutorSharedMemoryMapperService.cpp
   DefaultHostBootstrapValues.cpp
   JITLoaderGDB.cpp
