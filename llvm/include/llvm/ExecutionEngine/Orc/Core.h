@@ -1363,6 +1363,10 @@ public:
       SendResultFunction SendResult,
       const char *ArgData, size_t ArgSize)>;
 
+  /// Maps ExecutorSymbolDefs to JITDispatchHandlerFunctions.
+  using JITDispatchHandlerMap =
+      DenseMap<ExecutorAddr, JITDispatchHandlerFunction>;
+
   /// A map associating tag names with asynchronous wrapper function
   /// implementations in the JIT.
   using JITDispatchHandlerAssociationMap =
@@ -1676,6 +1680,21 @@ public:
           (Instance->*Method)(std::forward<MethodArgTs>(MethodArgs)...);
         });
   }
+
+  /// Associate AsyncHandlerWrapperFunctions with addresses in the executing
+  /// process.
+  ///
+  /// Each handler become callable from the executor using the ORC runtime
+  /// __orc_rt_jit_dispatch function and the associated address.
+  void registerJITDispatchHandlers(JITDispatchHandlerMap WFs);
+
+  /// De-associate the AsyncHandlerWrapperFunctions associated with the given
+  /// addresses. The addresses must have handlers currently associated.
+  ///
+  /// This will remove the handler from the jit-dispatch handler map. The
+  /// handler will be destroyed as soon as any currently executing instance
+  /// (called via runJITDispatchHandler with the given address) completes.
+  void deregisterJITDispatchHandlers(ArrayRef<ExecutorAddr> Keys);
 
   /// For each tag symbol name, associate the corresponding
   /// AsyncHandlerWrapperFunction with the address of that symbol. The

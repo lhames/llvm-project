@@ -1893,6 +1893,25 @@ ExecutionSession::lookup(ArrayRef<JITDylib *> SearchOrder, StringRef Name,
   return lookup(SearchOrder, intern(Name), RequiredState);
 }
 
+void ExecutionSession::registerJITDispatchHandlers(JITDispatchHandlerMap WFs) {
+  std::lock_guard<std::mutex> Lock(JITDispatchHandlersMutex);
+
+  for (auto &[KeyAddr, Handler] : WFs) {
+    assert(!JITDispatchHandlers.count(KeyAddr) && "Address already in use");
+    JITDispatchHandlers[KeyAddr] =
+        std::make_shared<JITDispatchHandlerFunction>(std::move(Handler));
+  }
+}
+
+void ExecutionSession::deregisterJITDispatchHandlers(
+    ArrayRef<ExecutorAddr> Keys) {
+  std::lock_guard<std::mutex> Lock(JITDispatchHandlersMutex);
+  for (auto &Key : Keys) {
+    assert(JITDispatchHandlers.count(Key) && "No handler for key");
+    JITDispatchHandlers.erase(Key);
+  }
+}
+
 Error ExecutionSession::registerJITDispatchHandlers(
     JITDylib &JD, JITDispatchHandlerAssociationMap WFs) {
 
@@ -1902,33 +1921,14 @@ Error ExecutionSession::registerJITDispatchHandlers(
   if (!TagSyms)
     return TagSyms.takeError();
 
-  // Associate tag addresses with implementations.
-  std::lock_guard<std::mutex> Lock(JITDispatchHandlersMutex);
-
-  // Check that no tags are being overwritten.
+  JITDispatchHandlerMap M;
   for (auto &[TagName, TagSym] : *TagSyms) {
-    auto TagAddr = TagSym.getAddress();
-    if (JITDispatchHandlers.count(TagAddr))
-      return make_error<StringError>("Tag " + formatv("{0:x}", TagAddr) +
-                                         " (for " + *TagName +
-                                         ") already registered",
-                                     inconvertibleErrorCode());
-  }
-
-  // At this point we're guaranteed to succeed. Install the handlers.
-  for (auto &[TagName, TagSym] : *TagSyms) {
-    auto TagAddr = TagSym.getAddress();
     auto I = WFs.find(TagName);
-    assert(I != WFs.end() && I->second &&
-           "JITDispatchHandler implementation missing");
-    JITDispatchHandlers[TagAddr] =
-        std::make_shared<JITDispatchHandlerFunction>(std::move(I->second));
-    LLVM_DEBUG({
-      dbgs() << "Associated function tag \"" << *TagName << "\" ("
-             << formatv("{0:x}", TagAddr) << ") with handler\n";
-    });
+    assert(I != WFs.end() && I->second && "JITDispatchHandler missing");
+    M[TagSym.getAddress()] = std::move(I->second);
   }
 
+  registerJITDispatchHandlers(std::move(M));
   return Error::success();
 }
 

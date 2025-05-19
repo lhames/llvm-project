@@ -75,7 +75,54 @@ TEST(ExecutionSessionWrapperFunctionCalls, RunNonVoidWrapperAsyncTemplate) {
   cantFail(ES.endSession());
 }
 
-TEST(ExecutionSessionWrapperFunctionCalls, RegisterAsyncHandlerAndRun) {
+TEST(ExecutionSessionWrapperFunctionCalls,
+     RegisterRunAndDeregisterAsyncHandler) {
+  constexpr ExecutorAddr AddAsyncTagAddr(0x01);
+
+  ExecutionSession ES(cantFail(SelfExecutorProcessControl::Create()));
+
+  ExecutionSession::JITDispatchHandlerMap Handlers;
+  Handlers[AddAsyncTagAddr] =
+      ES.wrapAsyncWithSPS<int32_t(int32_t, int32_t)>(addAsyncWrapper);
+
+  ES.registerJITDispatchHandlers(std::move(Handlers));
+
+  bool HandlerRun = false;
+  using ArgSerialization = SPSArgList<int32_t, int32_t>;
+  size_t ArgBufferSize = ArgSerialization::size(1, 2);
+  auto ArgBuffer = WrapperFunctionResult::allocate(ArgBufferSize);
+  SPSOutputBuffer OB(ArgBuffer.data(), ArgBuffer.size());
+  EXPECT_TRUE(ArgSerialization::serialize(OB, 1, 2));
+
+  ES.runJITDispatchHandler(
+      [&](WrapperFunctionResult ResultBuffer) {
+        int32_t Result;
+        SPSInputBuffer IB(ResultBuffer.data(), ResultBuffer.size());
+        EXPECT_TRUE(SPSArgList<int32_t>::deserialize(IB, Result));
+        EXPECT_EQ(Result, (int32_t)3);
+        HandlerRun = true;
+      },
+      AddAsyncTagAddr, ArrayRef<char>(ArgBuffer.data(), ArgBuffer.size()));
+
+  EXPECT_TRUE(HandlerRun);
+  HandlerRun = false;
+
+  ES.deregisterJITDispatchHandlers({AddAsyncTagAddr});
+
+  ES.runJITDispatchHandler(
+      [&](WrapperFunctionResult ResultBuffer) {
+        EXPECT_TRUE(!!ResultBuffer.getOutOfBandError());
+        HandlerRun = true;
+      },
+      AddAsyncTagAddr, ArrayRef<char>(ArgBuffer.data(), ArgBuffer.size()));
+
+  EXPECT_TRUE(HandlerRun);
+
+  cantFail(ES.endSession());
+}
+
+TEST(ExecutionSessionWrapperFunctionCalls,
+     RegisterAsyncHandlerViaSymbolAndRun) {
 
   constexpr ExecutorAddr AddAsyncTagAddr(0x01);
 
