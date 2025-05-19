@@ -1913,7 +1913,7 @@ void ExecutionSession::deregisterJITDispatchHandlers(
 }
 
 Error ExecutionSession::registerJITDispatchHandlers(
-    JITDylib &JD, JITDispatchHandlerAssociationMap WFs) {
+    JITDylib &JD, JITDispatchNamedHandlerMap WFs) {
 
   auto TagSyms = lookup({{&JD, JITDylibLookupFlags::MatchAllSymbols}},
                         SymbolLookupSet::fromMapKeys(

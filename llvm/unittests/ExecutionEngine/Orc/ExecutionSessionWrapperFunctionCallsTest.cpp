@@ -133,12 +133,12 @@ TEST(ExecutionSessionWrapperFunctionCalls,
   cantFail(JD.define(absoluteSymbols(
       {{AddAsyncTag, {AddAsyncTagAddr, JITSymbolFlags::Exported}}})));
 
-  ExecutionSession::JITDispatchHandlerAssociationMap Associations;
+  ExecutionSession::JITDispatchNamedHandlerMap Handlers;
 
-  Associations[AddAsyncTag] =
+  Handlers[AddAsyncTag] =
       ES.wrapAsyncWithSPS<int32_t(int32_t, int32_t)>(addAsyncWrapper);
 
-  cantFail(ES.registerJITDispatchHandlers(JD, std::move(Associations)));
+  cantFail(ES.registerJITDispatchHandlers(JD, std::move(Handlers)));
 
   std::promise<int32_t> RP;
   auto RF = RP.get_future();

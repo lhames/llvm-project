@@ -342,7 +342,7 @@ LazyReexportsManager::LazyReexportsManager(EmitTrampolinesFn EmitTrampolines,
 
   ErrorAsOutParameter _(&Err);
 
-  ExecutionSession::JITDispatchHandlerAssociationMap WFs;
+  ExecutionSession::JITDispatchNamedHandlerMap WFs;
 
   WFs[ES.intern("__orc_rt_resolve_tag")] =
       ES.wrapAsyncWithSPS<SPSExpected<SPSExecutorSymbolDef>(SPSExecutorAddr)>(

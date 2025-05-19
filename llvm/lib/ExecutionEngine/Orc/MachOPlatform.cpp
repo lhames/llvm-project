@@ -604,7 +604,7 @@ MachOPlatform::MachOPlatform(
 }
 
 Error MachOPlatform::associateRuntimeSupportFunctions() {
-  ExecutionSession::JITDispatchHandlerAssociationMap WFs;
+  ExecutionSession::JITDispatchNamedHandlerMap WFs;
 
   using PushInitializersSPSSig =
       SPSExpected<SPSMachOJITDylibDepInfoMap>(SPSExecutorAddr);

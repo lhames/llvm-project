@@ -27,7 +27,7 @@ void ReOptimizeLayer::ReOptMaterializationUnitState::reoptimizeFailed() {
 }
 
 Error ReOptimizeLayer::reigsterRuntimeFunctions(JITDylib &PlatformJD) {
-  ExecutionSession::JITDispatchHandlerAssociationMap WFs;
+  ExecutionSession::JITDispatchNamedHandlerMap WFs;
   using ReoptimizeSPSSig = shared::SPSError(uint64_t, uint32_t);
   WFs[Mangle("__orc_rt_reoptimize_tag")] =
       ES.wrapAsyncWithSPS<ReoptimizeSPSSig>(this,

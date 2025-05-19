@@ -438,7 +438,7 @@ ELFNixPlatform::ELFNixPlatform(
 }
 
 Error ELFNixPlatform::associateRuntimeSupportFunctions(JITDylib &PlatformJD) {
-  ExecutionSession::JITDispatchHandlerAssociationMap WFs;
+  ExecutionSession::JITDispatchNamedHandlerMap WFs;
 
   using RecordInitializersSPSSig =
       SPSExpected<SPSELFNixJITDylibDepInfoMap>(SPSExecutorAddr);

@@ -1369,7 +1369,7 @@ public:
 
   /// A map associating tag names with asynchronous wrapper function
   /// implementations in the JIT.
-  using JITDispatchHandlerAssociationMap =
+  using JITDispatchNamedHandlerMap =
       DenseMap<SymbolStringPtr, JITDispatchHandlerFunction>;
 
   /// Construct an ExecutionSession with the given ExecutorProcessControl
@@ -1706,7 +1706,7 @@ public:
   /// LookupFlags::WeaklyReferencedSymbol. Missing tag definitions will not
   /// cause an error, the handler will simply be dropped.
   Error registerJITDispatchHandlers(JITDylib &JD,
-                                    JITDispatchHandlerAssociationMap WFs);
+                                    JITDispatchNamedHandlerMap WFs);
 
   /// Run a registered jit-side wrapper function.
   /// This should be called by the ExecutorProcessControl instance in response
