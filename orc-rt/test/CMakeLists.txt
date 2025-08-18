@@ -30,12 +30,12 @@ configure_lit_site_cfg(
   ${CMAKE_CURRENT_SOURCE_DIR}/unit/lit.cfg.py
   )
 
-add_lit_testsuites(ORC-RT ${CMAKE_CURRENT_SOURCE_DIR}
-  DEPENDS ${ORC_RT_TEST_DEPS}
-)
+# add_lit_testsuites(ORC-RT ${CMAKE_CURRENT_SOURCE_DIR}
+#   DEPENDS ${ORC_RT_TEST_DEPS}
+# )
 
-# add_lit_testsuite(check-orcrt-unit "Running orc-rt unittest suites"
-#   ${CMAKE_CURRENT_BINARY_DIR}/unit
-#   EXCLUDE_FROM_CHECK_ALL
-#   DEPENDS OrcRTUnitTests)
+add_lit_testsuite(check-orc-rt-unit "Running orc-rt unittest suites"
+  ${CMAKE_CURRENT_BINARY_DIR}/unit
+  EXCLUDE_FROM_CHECK_ALL
+  DEPENDS OrcRTUnitTests)
 
