@@ -210,7 +210,12 @@ private:
   using ElemToSuperNodeMap =
       DenseMap<ContainerId, DenseMap<ElementId, SuperNode *>>;
 
-  using SuperNodeDepsMap = DenseMap<SuperNode *, DenseSet<SuperNode *>>;
+  struct SuperNodeInfo {
+    std::unique_ptr<SuperNode> OwnedSN;
+    DenseSet<SuperNode *> DependantSNs;
+  };
+
+  using SuperNodeDepsMap = DenseMap<SuperNode *, SuperNodeInfo>;
 
 public:
   class SuperNode {
@@ -226,15 +231,9 @@ public:
     const ContainerElementsMap &deps() const { return Deps; }
 
   private:
-    ContainerElementsMap Defs;
-    ContainerElementsMap Deps;
-
-    ElemToSuperNodeMap *RegisteredElemToSN = nullptr;
-
     /// Add a mapping from the Defs in this SuperNode to SN (which may or may
     /// not be the same as this).
-    void mapDefsTo(ElemToSuperNodeMap &ElemToSN, SuperNode *SN,
-                   bool AbandonOldMapping = false) {
+    void mapDefsTo(ElemToSuperNodeMap &ElemToSN, SuperNode *SN) {
       assert(!Defs.empty() && "Empty defs!?");
       for (auto &[Container, Elements] : Defs) {
         assert(!Elements.empty() && "Empty elements for container?");
@@ -242,23 +241,24 @@ public:
         for (auto &Elem : Elements)
           ContainerElemToSN[Elem] = SN;
       }
-      assert((AbandonOldMapping || !SN->RegisteredElemToSN ||
-              SN->RegisteredElemToSN == &ElemToSN) &&
+      assert((!SN->RegisteredElemToSN || SN->RegisteredElemToSN == &ElemToSN) &&
              "SN defs split across maps");
       SN->RegisteredElemToSN = &ElemToSN;
     }
 
     /// Add a mapping from the Defs in this SuperNode to this.
     /// (Equivalent to `SN.mapDefsTo(ElemToSN, &SN);`)
-    void mapDefsToThis(ElemToSuperNodeMap &ElemToSN,
-                       bool AbandonOldMapping = false) {
-      mapDefsTo(ElemToSN, this, AbandonOldMapping);
+    void mapDefsToThis(ElemToSuperNodeMap &ElemToSN) {
+      mapDefsTo(ElemToSN, this);
     }
 
     /// Remove a mapping from the Defs in this SuperNode from the registered
-    /// ElemToSuperNodeMap. The mapping must already exist.
+    /// ElemToSuperNodeMap.
     void unmapDefsFromThis() {
-      assert(RegisteredElemToSN && "No registered ElemToSuperNodeMap");
+      // If this node's defs aren't mapped then bail out.
+      if (!RegisteredElemToSN)
+        return;
+
       for (auto &[Container, Elements] : Defs) {
         auto I = RegisteredElemToSN->find(Container);
         assert(I != RegisteredElemToSN->end() && "Container not in map");
@@ -293,11 +293,82 @@ public:
 
           auto *DefSN = J->second;
           if (DefSN != this)
-            SuperNodeDeps[DefSN].insert(this);
+            SuperNodeDeps[DefSN].DependantSNs.insert(this);
           return true;
         });
       });
     }
+
+    /// Partially merge SN into this node for SCC processing. Absorbs SN's
+    /// Deps (building the union of external deps for the SCC) and Failed
+    /// flag, but defers Defs merging to completeMergeAndRemap/Unmap.
+    void preMerge(std::unique_ptr<SuperNode> SN) {
+      assert(SN);
+      Deps.merge(SN->Deps);
+      SN->Deps.clear(); // We're not going to use these any further.
+      Failed |= SN->Failed;
+      NodesToMerge.push_back(std::move(SN));
+    }
+
+    /// Merge SN (and any nodes pre-merged into it) into this SuperNode for
+    /// coalescing. Discards Deps (since we only coalesce when deps are
+    /// identical).
+    void mergeForCoalescing(std::unique_ptr<SuperNode> SN) {
+      assert(SN);
+      while (!SN->NodesToMerge.empty()) {
+        assert(SN->NodesToMerge.back()->NodesToMerge.empty() &&
+               "to-merge tree has depth > 1");
+        assert(SN->NodesToMerge.back()->Deps.empty() &&
+               "pre-merged node has non-empty deps");
+        NodesToMerge.push_back(SN->NodesToMerge.pop_back_val());
+      }
+      SN->Deps.clear();
+      NodesToMerge.push_back(std::move(SN));
+    }
+
+    // Merge any Defs from pre-merged nodes into this Node's Defs, mapping all
+    // Defs to this.
+    void completeMergeAndRemap(ElemToSuperNodeMap &ElemToSN) {
+      if (!RegisteredElemToSN)
+        mapDefsToThis(ElemToSN);
+      else
+        assert(RegisteredElemToSN == &ElemToSN && "SN defs split across maps");
+      while (!NodesToMerge.empty()) {
+        auto SN = NodesToMerge.pop_back_val();
+        SN->mapDefsTo(ElemToSN, this);
+        Defs.merge(std::move(SN->Defs), true);
+      }
+    }
+
+    /// Merge any Defs from pre-merged nodes into this Node's Defs, unmapping
+    /// all Defs from this.
+    void completeMergeAndUnmap() {
+      unmapDefsFromThis();
+      while (!NodesToMerge.empty()) {
+        auto SN = NodesToMerge.pop_back_val();
+        SN->unmapDefsFromThis();
+        Defs.merge(std::move(SN->Defs), true);
+      }
+    }
+
+    void abandonMapping() { RegisteredElemToSN = nullptr; }
+
+    ContainerElementsMap Defs;
+    ContainerElementsMap Deps;
+
+    SmallVector<std::unique_ptr<SuperNode>> NodesToMerge;
+
+    ElemToSuperNodeMap *RegisteredElemToSN = nullptr;
+
+    struct SCCInfo {
+      size_t Index = 0;
+      size_t LowLink = 0;
+      bool OnStack = false;
+      SuperNode *Root = nullptr;
+    };
+
+    SCCInfo SCC;
+    bool Failed = false;
   };
 
 private:
@@ -338,22 +409,20 @@ private:
       return NewSN;
     }
 
-    void coalesce(std::vector<std::unique_ptr<SuperNode>> &SNs,
-                  ElemToSuperNodeMap &ElemToSN,
-                  bool AbandonOldMapping = false) {
-      visitWithRemoval(SNs, [&](std::unique_ptr<SuperNode> &SN) {
-        assert(!SNHashes.count(SN.get()) &&
-               "Elements of SNs should be new to the coalescer");
-        auto H = getHash(SN->Deps);
-        if (auto *CanonicalSN = findCanonicalSuperNode(H, SN->Deps)) {
-          SN->mapDefsTo(ElemToSN, CanonicalSN, AbandonOldMapping);
-          CanonicalSN->Defs.merge(SN->Defs, /* AssertNoElementsOverlap */ true);
-          return true;
-        }
-        CanonicalSNs[H].push_back(SN.get());
-        SNHashes[SN.get()] = H;
-        return false;
-      });
+    std::unique_ptr<SuperNode> coalesce(std::unique_ptr<SuperNode> SN,
+                                        ElemToSuperNodeMap &ElemToSN) {
+      assert(!SNHashes.count(SN.get()) &&
+             "Elements of SNs should be new to the coalescer");
+      auto H = getHash(SN->Deps);
+      if (auto *CanonicalSN = findCanonicalSuperNode(H, SN->Deps)) {
+        CanonicalSN->mergeForCoalescing(std::move(SN));
+        CanonicalSN->completeMergeAndRemap(ElemToSN);
+        return nullptr;
+      }
+      SN->completeMergeAndRemap(ElemToSN);
+      CanonicalSNs[H].push_back(SN.get());
+      SNHashes[SN.get()] = H;
+      return SN;
     }
 
     /// Remove all coalescing information.
@@ -425,6 +494,12 @@ private:
     DenseMap<SuperNode *, hash_code> SNHashes;
   };
 
+  struct ProcessedResult {
+    std::vector<std::unique_ptr<SuperNode>> NewPendingSNs;
+    std::vector<std::unique_ptr<SuperNode>> ReadySNs;
+    std::vector<std::unique_ptr<SuperNode>> FailedSNs;
+  };
+
 public:
   /// Build SuperNodes from (definition-set, dependence-set) pairs.
   ///
@@ -461,6 +536,12 @@ public:
     SimplifyResult(std::vector<std::unique_ptr<SuperNode>> SNs,
                    ElemToSuperNodeMap ElemToSN)
         : SNs(std::move(SNs)), ElemToSN(std::move(ElemToSN)) {}
+
+    void clear() {
+      SNs.clear();
+      ElemToSN.clear();
+    }
+
     std::vector<std::unique_ptr<SuperNode>> SNs;
     ElemToSuperNodeMap ElemToSN;
   };
@@ -473,11 +554,29 @@ public:
       SN->mapDefsToThis(ElemToSN);
 
     SuperNodeDepsMap SuperNodeDeps;
-    hoistDeps(SNs, SuperNodeDeps, ElemToSN);
-    propagateDeps(SuperNodeDeps);
 
-    // Pre-coalesce nodes.
-    Coalescer().coalesce(SNs, ElemToSN);
+    // hoistDeps will build the graph and remove any intra-simplify
+    // dependencies.
+    hoistDeps(SNs, SuperNodeDeps, ElemToSN);
+
+    // Transfer SN ownership into SuperNodeDepsGraph.
+    while (!SNs.empty()) {
+      auto SN = std::move(SNs.back());
+      SNs.pop_back();
+      SuperNodeDeps[SN.get()].OwnedSN = std::move(SN);
+    }
+
+    // Identify and merge SCCs and build worklist.
+    auto Worklist = mergeSCCsAndBuildWorklist(SuperNodeDeps);
+
+    // Use worklist to propagate deps.
+    propagateDeps(std::move(Worklist), SuperNodeDeps);
+
+    // Run nodes through the coalescer and collect.
+    Coalescer C;
+    for (auto &[_, SNInfo] : SuperNodeDeps)
+      if (auto SN = C.coalesce(std::move(SNInfo.OwnedSN), ElemToSN))
+        SNs.push_back(std::move(SN));
 
     return {std::move(SNs), std::move(ElemToSN)};
   }
@@ -496,56 +595,47 @@ public:
   /// represented in the graph).
   template <typename GetExternalStateFn>
   EmitResult emit(SimplifyResult SR, GetExternalStateFn &&GetExternalState) {
-    auto NewSNs = std::move(SR.SNs);
-    auto ElemToNewSN = std::move(SR.ElemToSN);
-
-    // First process any dependencies on nodes with external state.
-    auto FailedSNs = processExternalDeps(NewSNs, GetExternalState);
+    // Remove ready dependencies. Mark failed nodes.
+    processExternalDeps(SR.SNs, GetExternalState);
 
     SuperNodeDepsMap SuperNodeDeps;
 
-    // Collect the PendingSNs whose dep sets are about to be modified.
-    std::vector<std::unique_ptr<SuperNode>> ModifiedPendingSNs;
+    // Lift PendingSNs whose dep sets will be modified into SuperNodeDeps.
     visitWithRemoval(PendingSNs, [&](std::unique_ptr<SuperNode> &SN) {
-      if (SN->hoistDeps(SuperNodeDeps, ElemToNewSN)) {
-        ModifiedPendingSNs.push_back(std::move(SN));
+      if (SN->hoistDeps(SuperNodeDeps, SR.ElemToSN)) {
+        CoalesceToPendingSNs.erase(SN.get());
+        SuperNodeDeps[SN.get()].OwnedSN = std::move(SN);
         return true;
       }
       return false;
     });
 
-    // Remove SNs whose deps have been modified from the coalescer.
-    for (auto &SN : ModifiedPendingSNs)
-      CoalesceToPendingSNs.erase(SN.get());
-
-    hoistDeps(NewSNs, SuperNodeDeps, ElemToPendingSN);
-    propagateDeps(SuperNodeDeps);
-
-    propagateFailures(FailedSNs, SuperNodeDeps);
-
-    // Process supernodes. Pending first, since we'll update PendingSNs when we
-    // incorporate NewSNs.
-    std::vector<std::unique_ptr<SuperNode>> ReadyNodes, FailedNodes;
-    processReadyOrFailed(ModifiedPendingSNs, ReadyNodes, FailedNodes,
-                         SuperNodeDeps, FailedSNs, true);
-    processReadyOrFailed(NewSNs, ReadyNodes, FailedNodes, SuperNodeDeps,
-                         FailedSNs, false);
-
-    CoalesceToPendingSNs.coalesce(ModifiedPendingSNs, ElemToPendingSN);
-    CoalesceToPendingSNs.coalesce(NewSNs, ElemToPendingSN,
-                                  /* AbandonOldMapping = */ true);
-
-    // Integrate remaining ModifiedPendingSNs and NewSNs into PendingSNs.
-    for (auto &SN : ModifiedPendingSNs)
-      PendingSNs.push_back(std::move(SN));
-
-    // Update ElemToPendingSN for the remaining elements.
-    for (auto &SN : NewSNs) {
-      SN->mapDefsToThis(ElemToPendingSN, /* AbandonOldMapping = */ true);
-      PendingSNs.push_back(std::move(SN));
+    // Lift new SNs into SuperNodeDeps.
+    for (auto &SN : SR.SNs) {
+      SN->abandonMapping();
+      SN->hoistDeps(SuperNodeDeps, ElemToPendingSN);
+      SuperNodeDeps[SN.get()].OwnedSN = std::move(SN);
     }
 
-    return {std::move(ReadyNodes), std::move(FailedNodes)};
+    // TODO: If hoists only happen in one direction or another (new -> pending,
+    //       or pending -> new) then we can't have a cycle. In that case it
+    //       might be worth bypassing mergeSCCsANdBuildWorklist.
+
+    SR.clear();
+
+    auto Worklist = mergeSCCsAndBuildWorklist(SuperNodeDeps);
+    propagateDeps(std::move(Worklist), SuperNodeDeps);
+
+    auto PR = processNodes(std::move(SuperNodeDeps));
+
+    for (auto &NewPendingSN : PR.NewPendingSNs) {
+      assert(NewPendingSN);
+      if (auto SN = CoalesceToPendingSNs.coalesce(std::move(NewPendingSN),
+                                                  ElemToPendingSN))
+        PendingSNs.push_back(std::move(SN));
+    }
+
+    return {std::move(PR.ReadySNs), std::move(PR.FailedSNs)};
   }
 
   /// Identify the given symbols as Failed.
@@ -660,65 +750,148 @@ private:
       SN->hoistDeps(SuperNodeDeps, ElemToSN);
   }
 
-  // Compute transitive closure of deps for each node.
-  static void propagateDeps(SuperNodeDepsMap &SuperNodeDeps) {
-
-    // Early exit for self-contained emits.
-    if (SuperNodeDeps.empty())
-      return;
-
+  /// Using Tarjan's algorithm, identify SCCs in SuperNodeDeps and merge the
+  /// nodes of each SCC into a single root node (this method only merges the
+  /// Deps of the nodes. The defs will be merged separately).
+  ///
+  /// Since all elements of an SCC will end up with the same Deps set this
+  /// should speed up propagation.
+  ///
+  /// Also builds a reverse-DFS worklist that can be used as an optimal ordering
+  /// by propagateDeps.
+  static SmallVector<SuperNode *>
+  mergeSCCsAndBuildWorklist(SuperNodeDepsMap &SuperNodeDeps) {
+    // Tarjan's algorithm for SCCs, modified to avoid recursion and coalesce
+    // the SCCs.
+    size_t Index = 0;
     SmallVector<SuperNode *> Worklist;
-    Worklist.reserve(SuperNodeDeps.size());
-    for (auto &[SN, SNDependants] : SuperNodeDeps)
-      Worklist.push_back(SN);
+    SmallVector<SuperNode *> Stack;
 
-    while (true) {
-      DenseSet<SuperNode *> ToVisitNext;
+    struct SCCFrame {
+      SuperNode *SN = nullptr;
+      DenseSet<SuperNode *> *Dependants = nullptr;
+      typename DenseSet<SuperNode *>::iterator DepItr;
+    };
+    SmallVector<SCCFrame> SCCStack;
 
-      // TODO: See if topo-sorting worklist improves convergence.
-
-      while (!Worklist.empty()) {
-        auto *SN = Worklist.pop_back_val();
-        auto I = SuperNodeDeps.find(SN);
-        if (I == SuperNodeDeps.end())
-          continue;
-
-        for (auto *DependantSN : I->second)
-          if (DependantSN->Deps.merge(SN->Deps))
-            ToVisitNext.insert(DependantSN);
+    auto Visit = [&](SuperNode *SN) {
+      assert(!SN->SCC.Index && "SN already visited");
+      SN->SCC.Index = SN->SCC.LowLink = ++Index;
+      SN->SCC.OnStack = true;
+      Stack.push_back(SN);
+      SCCStack.push_back({});
+      SCCStack.back().SN = SN;
+      auto I = SuperNodeDeps.find(SN);
+      if (I != SuperNodeDeps.end()) {
+        SCCStack.back().Dependants = &I->second.DependantSNs;
+        SCCStack.back().DepItr = SCCStack.back().Dependants->begin();
       }
+    };
 
-      if (ToVisitNext.empty())
-        break;
+    for (auto &[Root, SNDepInfo] : SuperNodeDeps) {
+      if (Root->SCC.Index) // Non-zero index serves as "visited" flag.
+        continue;
 
-      Worklist.append(ToVisitNext.begin(), ToVisitNext.end());
+      Visit(Root);
+
+      while (!SCCStack.empty()) {
+        auto &Frame = SCCStack.back();
+        auto *SN = Frame.SN;
+        if (Frame.Dependants && Frame.DepItr != Frame.Dependants->end()) {
+          // If there are any dependants of SN then process them.
+          auto *DepSN = *Frame.DepItr++;
+          if (!DepSN->SCC.Index)
+            Visit(DepSN); // Visit if not visited already.
+          else if (DepSN->SCC.OnStack)
+            SN->SCC.LowLink = std::min(SN->SCC.LowLink, DepSN->SCC.Index);
+        } else {
+
+          // Found an SCC root.
+          if (SN->SCC.LowLink == SN->SCC.Index) {
+            while (Stack.back() != SN) {
+              auto *DepSN = Stack.pop_back_val();
+              DepSN->SCC.OnStack = false;
+              DepSN->SCC.Root = SN;
+            }
+
+            assert(Stack.back() == SN);
+            Stack.pop_back();
+            SN->SCC.OnStack = false;
+            Worklist.push_back(SN);
+          }
+
+          SCCStack.pop_back();
+          if (!SCCStack.empty())
+            SCCStack.back().SN->SCC.LowLink =
+                std::min(SCCStack.back().SN->SCC.LowLink, SN->SCC.LowLink);
+        }
+      }
     }
+
+    // Merge nodes and remap elements of DependantSNs to account for the merge.
+    SmallVector<SuperNode *> ToRemove;
+    for (auto &[SN, SNInfo] : SuperNodeDeps) {
+      if (auto *RootSN = SN->SCC.Root) {
+        assert(SNInfo.OwnedSN);
+        RootSN->preMerge(std::move(SNInfo.OwnedSN));
+        // RootSN is always already in SuperNodeDeps (it was placed there
+        // before calling this method), so this won't insert or rehash.
+        auto &RootSNInfo = SuperNodeDeps[RootSN];
+        for (auto *DepSN : SNInfo.DependantSNs) {
+          auto *DepRootSN = DepSN->SCC.Root ? DepSN->SCC.Root : DepSN;
+          if (DepRootSN != RootSN)
+            RootSNInfo.DependantSNs.insert(DepRootSN);
+        }
+        ToRemove.push_back(SN);
+      } else {
+        DenseSet<SuperNode *> NewDependantSNs;
+
+        for (auto &DepSN : SNInfo.DependantSNs) {
+          auto *DepRootSN = DepSN->SCC.Root ? DepSN->SCC.Root : DepSN;
+          if (DepRootSN != SN)
+            NewDependantSNs.insert(DepRootSN);
+        }
+
+        SNInfo.DependantSNs = std::move(NewDependantSNs);
+        SN->SCC = {};
+      }
+    }
+
+    // Remove merged nodes.
+    for (auto *SN : ToRemove)
+      SuperNodeDeps.erase(SN);
+
+    return Worklist;
   }
 
-  static void propagateFailures(DenseSet<SuperNode *> &FailedNodes,
-                                SuperNodeDepsMap &SuperNodeDeps) {
-    if (FailedNodes.empty())
-      return;
+  /// Propagate deps and failure status through the dependency graph.
+  /// The worklist is in reverse topological order (dependencies before
+  /// dependants when popped from the back), guaranteeing single-pass
+  /// convergence for a DAG.
+  static void propagateDeps(SmallVector<SuperNode *> Worklist,
+                            SuperNodeDepsMap &SuperNodeDeps) {
 
-    SmallVector<SuperNode *> Worklist(FailedNodes.begin(), FailedNodes.end());
+    if (Worklist.empty())
+      return;
 
     while (!Worklist.empty()) {
       auto *SN = Worklist.pop_back_val();
+
       auto I = SuperNodeDeps.find(SN);
       if (I == SuperNodeDeps.end())
         continue;
 
-      for (auto *DependantSN : I->second)
-        if (FailedNodes.insert(DependantSN).second)
-          Worklist.push_back(DependantSN);
+      auto &DependantSNs = I->second.DependantSNs;
+      for (auto &DepSN : DependantSNs) {
+        DepSN->Failed |= SN->Failed;
+        DepSN->Deps.merge(SN->Deps);
+      }
     }
   }
 
   template <typename GetExternalStateFn>
-  static DenseSet<SuperNode *>
-  processExternalDeps(std::vector<std::unique_ptr<SuperNode>> &SNs,
-                      GetExternalStateFn &GetExternalState) {
-    DenseSet<SuperNode *> FailedSNs;
+  static void processExternalDeps(std::vector<std::unique_ptr<SuperNode>> &SNs,
+                                  GetExternalStateFn &GetExternalState) {
     for (auto &SN : SNs)
       SN->Deps.visit([&](ContainerId &Container, ElementSet &Elements) {
         return Elements.remove_if([&](ElementId &Elem) {
@@ -728,35 +901,35 @@ private:
           case ExternalState::Ready:
             return true;
           case ExternalState::Failed:
-            FailedSNs.insert(SN.get());
+            SN->Failed = true;
             return true;
-          };
+          }
         });
       });
-
-    return FailedSNs;
   }
 
-  void processReadyOrFailed(std::vector<std::unique_ptr<SuperNode>> &SNs,
-                            std::vector<std::unique_ptr<SuperNode>> &Ready,
-                            std::vector<std::unique_ptr<SuperNode>> &Failed,
-                            SuperNodeDepsMap &SuperNodeDeps,
-                            const DenseSet<SuperNode *> &FailedSNs,
-                            bool UnmapFromElemToSN) {
+  /// Returns the tuple of (NewPending, Ready, Failed) nodes.
+  ProcessedResult processNodes(SuperNodeDepsMap SuperNodeDeps) {
+    ProcessedResult PR;
 
-    visitWithRemoval(SNs, [&](std::unique_ptr<SuperNode> &SN) {
-      bool SNFailed = FailedSNs.count(SN.get());
-      bool SNReady = SN->Deps.empty();
+    for (auto &[SN, SNInfo] : SuperNodeDeps) {
 
-      if (SNReady || SNFailed) {
-        if (UnmapFromElemToSN)
-          SN->unmapDefsFromThis();
-        auto &ToList = SNFailed ? Failed : Ready;
-        ToList.push_back(std::move(SN));
-        return true;
+      if (!SNInfo.OwnedSN)
+        continue;
+
+      if (SN->Failed) {
+        SN->completeMergeAndUnmap();
+        PR.FailedSNs.push_back(std::move(SNInfo.OwnedSN));
+      } else if (SN->Deps.empty()) {
+        SN->completeMergeAndUnmap();
+        PR.ReadySNs.push_back(std::move(SNInfo.OwnedSN));
+      } else {
+        // No complete-merge here: The Coalescer will do that.
+        PR.NewPendingSNs.push_back(std::move(SNInfo.OwnedSN));
       }
-      return false;
-    });
+    }
+
+    return PR;
   }
 
   std::vector<std::unique_ptr<SuperNode>> PendingSNs;

@@ -551,6 +551,121 @@ TEST_F(WaitingOnGraphTest, Simplification_SimplifyIntraSimplifyPropagateDeps) {
   EXPECT_EQ(getElemToSN(SR), ExpectedElemToSNs);
 }
 
+TEST_F(WaitingOnGraphTest, Simplification_PropagateDepsThroughSCC) {
+  // Test that deps are correctly propagated through SCC members to external
+  // dependants.
+  //
+  // NA: (0, 0) -> (0, 1)         -- depends only on N1
+  // NB: (0, 3) -> (0, 2)         -- depends only on N2
+  // N1: (0, 1) -> (0, 2), (1, 0) -- SCC member, has external dep
+  // N2: (0, 2) -> (0, 1), (1, 1) -- SCC member, has external dep
+  //
+  // N1 and N2 form an SCC with external deps {(1, {0, 1})}. NA and NB each
+  // depend on exactly one SCC member, so regardless of which is selected as
+  // root at least one of NA/NB depends on a non-root member and exercises
+  // the DependantSNs transfer. Both SCC members contribute a distinct
+  // external dep so the inherited dep set depends on correct propagation.
+  // After simplification all four nodes should coalesce into a single node
+  // with deps {(1, {0, 1})}.
+  SuperNodeBuilder B;
+  B.add(ContainerElementsMap({{0, {0}}}), ContainerElementsMap({{0, {1}}}));
+  B.add(ContainerElementsMap({{0, {3}}}), ContainerElementsMap({{0, {2}}}));
+  B.add(ContainerElementsMap({{0, {1}}}),
+        ContainerElementsMap({{0, {2}}, {1, {0}}}));
+  B.add(ContainerElementsMap({{0, {2}}}),
+        ContainerElementsMap({{0, {1}}, {1, {1}}}));
+  auto SR = TestGraph::simplify(B.takeSuperNodes());
+
+  // All four should coalesce: NA and NB inherit {(1, {0, 1})} from the SCC,
+  // giving all nodes the same dep set.
+  auto &SNs = getSNs(SR);
+  EXPECT_EQ(SNs.size(), 1U);
+  EXPECT_EQ(getDefs(*SNs.at(0)), ContainerElementsMap({{0, {0, 1, 2, 3}}}));
+  EXPECT_EQ(getDeps(*SNs.at(0)), ContainerElementsMap({{1, {0, 1}}}));
+
+  // Check ElemToSNs.
+  ElemToSuperNodeMap ExpectedElemToSNs;
+  for (auto I : {0, 1, 2, 3})
+    ExpectedElemToSNs[0][I] = SNs[0].get();
+  EXPECT_EQ(getElemToSN(SR), ExpectedElemToSNs);
+}
+
+TEST_F(WaitingOnGraphTest, Simplification_PropagateDepsThroughThreeNodeSCC) {
+  // Test that deps are correctly propagated through a 3-node SCC to external
+  // dependants.
+  //
+  // NA: (0, 0) -> (0, 1)         -- depends only on N1
+  // NB: (0, 4) -> (0, 3)         -- depends only on N3
+  // N1: (0, 1) -> (0, 2), (1, 0) -- SCC member, has external dep
+  // N2: (0, 2) -> (0, 3)         -- SCC member
+  // N3: (0, 3) -> (0, 1), (1, 1) -- SCC member, has external dep
+  //
+  // N1, N2, N3 form a 3-node SCC with external deps {(1, {0, 1})}. NA and
+  // NB each depend on exactly one SCC member, so regardless of which is
+  // selected as root at least one of NA/NB depends on a non-root member.
+  // Two SCC members contribute distinct external deps so the inherited dep
+  // set depends on correct propagation. After simplification all five nodes
+  // should coalesce into a single node with deps {(1, {0, 1})}.
+  SuperNodeBuilder B;
+  B.add(ContainerElementsMap({{0, {0}}}), ContainerElementsMap({{0, {1}}}));
+  B.add(ContainerElementsMap({{0, {4}}}), ContainerElementsMap({{0, {3}}}));
+  B.add(ContainerElementsMap({{0, {1}}}),
+        ContainerElementsMap({{0, {2}}, {1, {0}}}));
+  B.add(ContainerElementsMap({{0, {2}}}), ContainerElementsMap({{0, {3}}}));
+  B.add(ContainerElementsMap({{0, {3}}}),
+        ContainerElementsMap({{0, {1}}, {1, {1}}}));
+  auto SR = TestGraph::simplify(B.takeSuperNodes());
+
+  // All five should coalesce: NA and NB inherit {(1, {0, 1})} from the SCC.
+  auto &SNs = getSNs(SR);
+  EXPECT_EQ(SNs.size(), 1U);
+  EXPECT_EQ(getDefs(*SNs.at(0)), ContainerElementsMap({{0, {0, 1, 2, 3, 4}}}));
+  EXPECT_EQ(getDeps(*SNs.at(0)), ContainerElementsMap({{1, {0, 1}}}));
+
+  // Check ElemToSNs.
+  ElemToSuperNodeMap ExpectedElemToSNs;
+  for (auto I : {0, 1, 2, 3, 4})
+    ExpectedElemToSNs[0][I] = SNs[0].get();
+  EXPECT_EQ(getElemToSN(SR), ExpectedElemToSNs);
+}
+
+TEST_F(WaitingOnGraphTest, Simplification_CoalesceSCCsWithSameDeps) {
+  // Test that when two SCCs with the same external deps are coalesced during
+  // simplification, all defs (including those from SCC-merged nodes) are
+  // correctly preserved.
+  //
+  // SCC1: N0: (0, 0) -> (0, 1), (1, 0)
+  //       N1: (0, 1) -> (0, 0), (1, 0)
+  // SCC2: N2: (0, 2) -> (0, 3), (1, 0)
+  //       N3: (0, 3) -> (0, 2), (1, 0)
+  //
+  // Each SCC should be collapsed internally, producing an SCC root with
+  // NodesToMerge. Both roots will have the same remaining deps {(1, {0})},
+  // causing the coalescer to merge them. All four defs must be preserved.
+  SuperNodeBuilder B;
+  B.add(ContainerElementsMap({{0, {0}}}),
+        ContainerElementsMap({{0, {1}}, {1, {0}}}));
+  B.add(ContainerElementsMap({{0, {1}}}),
+        ContainerElementsMap({{0, {0}}, {1, {0}}}));
+  B.add(ContainerElementsMap({{0, {2}}}),
+        ContainerElementsMap({{0, {3}}, {1, {0}}}));
+  B.add(ContainerElementsMap({{0, {3}}}),
+        ContainerElementsMap({{0, {2}}, {1, {0}}}));
+  auto SR = TestGraph::simplify(B.takeSuperNodes());
+
+  // Check SNs: should be a single node with all defs and the external dep.
+  auto &SNs = getSNs(SR);
+  EXPECT_EQ(SNs.size(), 1U);
+  EXPECT_EQ(getDefs(*SNs.at(0)), ContainerElementsMap({{0, {0, 1, 2, 3}}}));
+  EXPECT_EQ(getDeps(*SNs.at(0)), ContainerElementsMap({{1, {0}}}));
+
+  // Check ElemToSNs: all four elements should map to the single supernode.
+  ElemToSuperNodeMap ExpectedElemToSNs;
+  for (size_t I = 0; I != 4; ++I)
+    ExpectedElemToSNs[0][I] = SNs[0].get();
+  EXPECT_EQ(getElemToSN(SR), ExpectedElemToSNs);
+}
+
 TEST_F(WaitingOnGraphTest, Emit_EmptyEmit) {
   // Check that empty emits work as expected.
   auto ER = G.emit(TestGraph::simplify({}), GetExternalState);
@@ -611,6 +726,208 @@ TEST_F(WaitingOnGraphTest, Emit_SingleContainerSimpleCycle) {
 
   EXPECT_EQ(collapseDefs(ER1.Ready), merge(Defs0, Defs1));
   EXPECT_EQ(ER1.Failed.size(), 0U);
+}
+
+TEST_F(WaitingOnGraphTest, Emit_SingleContainerIndependentCycles) {
+  // Create two independent cycles across two emits, each of which depends on
+  // additional "guard" dependencies. Check that the guard dependencies
+  // don't leak across the independent cycles.
+  // Emit 0: (0, 0) depends on (0, 1), (0, 2)*;
+  //         (1, 0) depends on (1, 1), (1, 2)*
+  //  * Guard dependencies
+  // Emit 1: (0, 1) depends on (0, 0);
+  //         (1, 1) depends on (1, 0);
+  //
+  // At this point cycles should have been eliminated (inside emit) with the
+  // result that:
+  //   1. (0, 0) and (0, 1) both depend on (0, 2)
+  //   2. (1, 0) and (1, 1) both depend on (1, 2)
+  //
+  // Now we emit each of the guard dependencies (emit 2, emit 3) and verify
+  // that the expected nodes become ready at each step.
+  SuperNodeBuilder B;
+
+  // Emit 0: Chains with guard dependencies.
+  ContainerElementsMap Defs0A({{0, {0}}});
+  ContainerElementsMap Deps0A({{0, {1, 2}}});
+  B.add(Defs0A, Deps0A);
+  ContainerElementsMap Defs0B({{1, {0}}});
+  ContainerElementsMap Deps0B({{1, {1, 2}}});
+  B.add(Defs0B, Deps0B);
+  auto ER0 = emit(TestGraph::simplify(B.takeSuperNodes()));
+  EXPECT_EQ(ER0.Ready.size(), 0U);
+  EXPECT_EQ(ER0.Failed.size(), 0U);
+
+  // Emit 1: Close head of chains to form cycles.
+  ContainerElementsMap Defs1A({{0, {1}}});
+  ContainerElementsMap Deps1A({{0, {0}}});
+  B.add(Defs1A, Deps1A);
+  ContainerElementsMap Defs1B({{1, {1}}});
+  ContainerElementsMap Deps1B({{1, {0}}});
+  B.add(Defs1B, Deps1B);
+  auto ER1 = emit(TestGraph::simplify(B.takeSuperNodes()));
+  EXPECT_EQ(ER1.Ready.size(), 0U);
+  EXPECT_EQ(ER1.Failed.size(), 0U);
+
+  // Emit 2: Emit first guard dependency, expect { (0, 0), (0, 1) (0, 2) } to
+  //         become ready.
+  ContainerElementsMap Defs2({{0, {2}}});
+  ContainerElementsMap Empty;
+  B.add(Defs2, Empty);
+  auto ER2 = emit(TestGraph::simplify(B.takeSuperNodes()));
+  EXPECT_EQ(collapseDefs(ER2.Ready), merge(merge(Defs0A, Defs1A), Defs2));
+  EXPECT_EQ(ER2.Failed.size(), 0U);
+
+  // Emit 3: Emit second guard dependency, expect { (1, 0), (1, 1) (1, 2) } to
+  //         become ready.
+  ContainerElementsMap Defs3({{1, {2}}});
+  B.add(Defs3, Empty);
+  auto ER3 = emit(TestGraph::simplify(B.takeSuperNodes()));
+  EXPECT_EQ(collapseDefs(ER3.Ready), merge(merge(Defs0B, Defs1B), Defs3));
+  EXPECT_EQ(ER3.Failed.size(), 0U);
+}
+
+TEST_F(WaitingOnGraphTest, Emit_NoSCCPollutionFromDependants) {
+  // Given a node that depends upon a cycle but does not contribute to it,
+  // ensure that the cycle doesn't pick up any dependencies from that node.
+  //
+  // E.g., given:
+  //
+  //   N0: (0, 0) (not part of cycle) depends on (0, 1), (0, 10)
+  //   N1: (0, 1) depends on (0, 2) (cycle forward edge)
+  //   N2: (0, 2) depends on (0, 1) (cycle back edge)
+  //
+  // We want to ensure that N1 and N2 don't pick up dependencies on (0, 10)
+  // from N0.
+  SuperNodeBuilder B;
+
+  // Emit the spur:
+  ContainerElementsMap Defs0({{0, {0}}});
+  ContainerElementsMap Deps0({{0, {1, 10}}});
+  B.add(Defs0, Deps0);
+  auto ER0 = emit(TestGraph::simplify(B.takeSuperNodes()));
+  EXPECT_EQ(ER0.Ready.size(), 0U);
+  EXPECT_EQ(ER0.Failed.size(), 0U);
+
+  // Emit first edge of the cycle.
+  ContainerElementsMap Defs1({{0, {1}}});
+  ContainerElementsMap Deps1({{0, {2}}});
+  B.add(Defs1, Deps1);
+  auto ER1 = emit(TestGraph::simplify(B.takeSuperNodes()));
+  EXPECT_EQ(ER1.Ready.size(), 0U);
+  EXPECT_EQ(ER1.Failed.size(), 0U);
+
+  // Emit second edge of the cycle.
+  // We expect the nodes of the cycle, (0, 1) and (0, 2) to become ready, but
+  // the spur node (0, 0) to remain due to the dependence on (0, 10).
+  ContainerElementsMap Defs2({{0, {2}}});
+  ContainerElementsMap Deps2({{0, {1}}});
+  B.add(Defs2, Deps2);
+  auto ER2 = emit(TestGraph::simplify(B.takeSuperNodes()));
+  EXPECT_EQ(collapseDefs(ER2.Ready), merge(Defs1, Defs2));
+  EXPECT_EQ(ER2.Failed.size(), 0U);
+
+  // Emit the spur dependence.
+  ContainerElementsMap Defs3({{0, {10}}});
+  ContainerElementsMap Empty;
+  B.add(Defs3, Empty);
+  auto ER3 = emit(TestGraph::simplify(B.takeSuperNodes()));
+  EXPECT_EQ(collapseDefs(ER3.Ready), merge(Defs0, Defs3));
+  EXPECT_EQ(ER3.Failed.size(), 0U);
+}
+
+TEST_F(WaitingOnGraphTest, Emit_PropagateDepsThroughSCC) {
+  // Test that external dependants of SCC members correctly inherit the SCC's
+  // remaining external deps during emit.
+  //
+  // NA: (0, 0) -> (0, 1)         -- depends only on N1
+  // NB: (0, 3) -> (0, 2)         -- depends only on N2
+  // N1: (0, 1) -> (0, 2), (1, 0) -- SCC member with external dep
+  // N2: (0, 2) -> (0, 1), (1, 1) -- SCC member with external dep
+  //
+  // N1 and N2 form an SCC with external deps {(1, {0, 1})}. NA and NB each
+  // depend on exactly one SCC member, so regardless of which is selected as
+  // root at least one of NA/NB depends on a non-root member. Both SCC
+  // members contribute a distinct external dep. All should remain pending
+  // until both external deps are resolved.
+  SuperNodeBuilder B;
+
+  // Emit 0: NA depends on (0, 1), NB depends on (0, 2).
+  ContainerElementsMap DefsA({{0, {0}}});
+  ContainerElementsMap DepsA({{0, {1}}});
+  B.add(DefsA, DepsA);
+  ContainerElementsMap DefsB({{0, {3}}});
+  ContainerElementsMap DepsB({{0, {2}}});
+  B.add(DefsB, DepsB);
+  auto ER0 = emit(TestGraph::simplify(B.takeSuperNodes()));
+  EXPECT_EQ(ER0.Ready.size(), 0U);
+  EXPECT_EQ(ER0.Failed.size(), 0U);
+
+  // Emit 1: N1 and N2 form a cycle. N1 has external dep (1, 0), N2 has
+  // external dep (1, 1). After SCC merge, the cycle resolves internally but
+  // {(1, {0, 1})} remains. NA and NB should inherit these and stay pending.
+  ContainerElementsMap Defs1({{0, {1}}});
+  ContainerElementsMap Deps1({{0, {2}}, {1, {0}}});
+  B.add(Defs1, Deps1);
+  ContainerElementsMap Defs2({{0, {2}}});
+  ContainerElementsMap Deps2({{0, {1}}, {1, {1}}});
+  B.add(Defs2, Deps2);
+  auto ER1 = emit(TestGraph::simplify(B.takeSuperNodes()));
+  EXPECT_EQ(ER1.Ready.size(), 0U);
+  EXPECT_EQ(ER1.Failed.size(), 0U);
+
+  // Emit 2: Resolve both external deps. All nodes should become ready.
+  ContainerElementsMap Defs3({{1, {0, 1}}});
+  ContainerElementsMap Empty;
+  B.add(Defs3, Empty);
+  auto ER2 = emit(TestGraph::simplify(B.takeSuperNodes()));
+  EXPECT_EQ(collapseDefs(ER2.Ready),
+            merge(merge(merge(DefsA, DefsB), Defs1), merge(Defs2, Defs3)));
+  EXPECT_EQ(ER2.Failed.size(), 0U);
+}
+
+TEST_F(WaitingOnGraphTest, Emit_FailurePropagationThroughSCC) {
+  // Test that failure correctly propagates through an SCC to external
+  // dependants of SCC members.
+  //
+  // NA: (0, 0) -> (0, 1)         -- depends only on N1
+  // NB: (0, 3) -> (0, 2)         -- depends only on N2
+  // N1: (0, 1) -> (0, 2), (1, 0) -- SCC member with external dep
+  // N2: (0, 2) -> (0, 1), (1, 1) -- SCC member with external dep
+  //
+  // (1, 0) is marked Failed before the SCC is emitted. NA and NB each
+  // depend on exactly one SCC member, so regardless of which is selected as
+  // root at least one of NA/NB depends on a non-root member. The failure
+  // should propagate through the SCC to both NA and NB.
+  SuperNodeBuilder B;
+
+  // Mark (1, 0) as Failed.
+  Failed[1].insert(0);
+
+  // Emit 0: NA depends on (0, 1), NB depends on (0, 2).
+  ContainerElementsMap DefsA({{0, {0}}});
+  ContainerElementsMap DepsA({{0, {1}}});
+  B.add(DefsA, DepsA);
+  ContainerElementsMap DefsB({{0, {3}}});
+  ContainerElementsMap DepsB({{0, {2}}});
+  B.add(DefsB, DepsB);
+  auto ER0 = emit(TestGraph::simplify(B.takeSuperNodes()));
+  EXPECT_EQ(ER0.Ready.size(), 0U);
+  EXPECT_EQ(ER0.Failed.size(), 0U);
+
+  // Emit 1: N1 and N2 form a cycle. N1 depends on (1, 0) which is Failed.
+  // The failure should propagate to the entire SCC, and then to both NA
+  // and NB.
+  ContainerElementsMap Defs1({{0, {1}}});
+  ContainerElementsMap Deps1({{0, {2}}, {1, {0}}});
+  B.add(Defs1, Deps1);
+  ContainerElementsMap Defs2({{0, {2}}});
+  ContainerElementsMap Deps2({{0, {1}}, {1, {1}}});
+  B.add(Defs2, Deps2);
+  auto ER1 = emit(TestGraph::simplify(B.takeSuperNodes()));
+  EXPECT_EQ(ER1.Ready.size(), 0U);
+  EXPECT_EQ(collapseDefs(ER1.Failed, false),
+            merge(merge(DefsA, DefsB), merge(Defs1, Defs2)));
 }
 
 TEST_F(WaitingOnGraphTest, Emit_TrivialReverseSequence) {
