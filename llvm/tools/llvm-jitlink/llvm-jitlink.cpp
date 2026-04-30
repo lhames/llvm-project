@@ -79,6 +79,8 @@
 #include <unistd.h>
 #endif // LLVM_ON_UNIX
 
+#include "WindowsEasyEHPlugin.h"
+
 #define DEBUG_TYPE "llvm_jitlink"
 
 using namespace llvm;
@@ -1268,6 +1270,8 @@ Session::Session(std::unique_ptr<ExecutorProcessControl> EPC, Error &Err)
       return;
     }
   }
+
+  ObjLayer->addPlugin(std::make_unique<WindowsEasyEHPlugin>());
 
   if (DebuggerSupport && TT.isOSBinFormatMachO()) {
     if (!ProcessSymsJD) {
