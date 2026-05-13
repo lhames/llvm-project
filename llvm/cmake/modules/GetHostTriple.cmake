@@ -16,7 +16,7 @@ function( get_host_triple var )
     else()
       set( value "i686-pc-windows-msvc" )
     endif()
-  elseif( MINGW AND NOT MSYS )
+  elseif( MINGW )
     # CMake doesn't provide COMPILER_ARCHITECTURE_ID for Clang/GCC,
     # but it does for MSVC.
     if( CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "ARM.*" )

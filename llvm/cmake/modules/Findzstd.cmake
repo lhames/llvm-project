@@ -16,6 +16,8 @@ else()
   set(zstd_STATIC_LIBRARY_SUFFIX "\\${CMAKE_STATIC_LIBRARY_SUFFIX}$")
 endif()
 
+find_package(zstd CONFIG QUIET)
+if(NOT zstd_FOUND)
 find_path(zstd_INCLUDE_DIR NAMES zstd.h)
 find_library(zstd_LIBRARY NAMES zstd zstd_static)
 find_library(zstd_STATIC_LIBRARY NAMES
@@ -27,6 +29,7 @@ find_package_handle_standard_args(
     zstd DEFAULT_MSG
     zstd_LIBRARY zstd_INCLUDE_DIR
 )
+endif()
 
 if(zstd_FOUND)
   if(zstd_LIBRARY MATCHES "${zstd_STATIC_LIBRARY_SUFFIX}$" AND NOT zstd_LIBRARY MATCHES "\\.dll\\.a$")
@@ -38,7 +41,7 @@ if(zstd_FOUND)
       # IMPORTED_LOCATION is the path to the DLL and IMPORTED_IMPLIB is the "library".
       get_filename_component(zstd_DIRNAME "${zstd_LIBRARY}" DIRECTORY)
       if(NOT "${CMAKE_INSTALL_LIBDIR}" STREQUAL "" AND NOT "${CMAKE_INSTALL_BINDIR}" STREQUAL "")
-        string(REGEX REPLACE "${CMAKE_INSTALL_LIBDIR}$" "${CMAKE_INSTALL_BINDIR}" zstd_DIRNAME "${zstd_DIRNAME}")
+        string(REGEX REPLACE "\\${CMAKE_INSTALL_LIBDIR}$" "${CMAKE_INSTALL_BINDIR}" zstd_DIRNAME "${zstd_DIRNAME}")
       endif()
       get_filename_component(zstd_BASENAME "${zstd_LIBRARY}" NAME)
       string(REGEX REPLACE "\\${CMAKE_LINK_LIBRARY_SUFFIX}$" "${CMAKE_SHARED_LIBRARY_SUFFIX}" zstd_BASENAME "${zstd_BASENAME}")

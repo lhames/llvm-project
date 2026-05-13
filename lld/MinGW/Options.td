@@ -249,6 +249,8 @@ def alias_undefined_u: JoinedOrSeparate<["-"], "u">, Alias<undefined>;
 // Ignored options
 def: Joined<["-"], "O">;
 def: F<"as-needed">;
+def: F<"default-image-base-high">;
+def: F<"default-image-base-low">;
 def: F<"disable-auto-image-base">;
 def: F<"enable-auto-image-base">;
 def: F<"end-group">;

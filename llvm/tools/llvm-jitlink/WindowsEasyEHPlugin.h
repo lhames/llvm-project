@@ -24,7 +24,7 @@
 #include <limits>
 
 #ifdef _WIN32
-#include <winnt.h>
+#include <windows.h>
 #else
 // For testing purposes only.
 using DWORD = uint32_t;
