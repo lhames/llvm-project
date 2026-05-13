@@ -51,6 +51,7 @@ add_llvm_unittest(OrcJITTests
   WaitingOnGraphTest.cpp
   WrapperFunctionUtilsTest.cpp
   JITLinkRedirectionManagerTest.cpp
+  LLJITJITLinkSelectionTest.cpp
   ReOptimizeLayerTest.cpp
 
   EXPORT_SYMBOLS

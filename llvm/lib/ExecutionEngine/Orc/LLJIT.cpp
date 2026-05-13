@@ -813,7 +813,7 @@ Error LLJITBuilderState::prepareForConstruction() {
       UseJITLink = TT.isOSBinFormatELF();
       break;
     case Triple::x86_64:
-      UseJITLink = !TT.isOSBinFormatCOFF();
+      UseJITLink = true;
       break;
     case Triple::ppc64:
       UseJITLink = TT.isPPC64ELFv2ABI();
