@@ -727,8 +727,12 @@ def host_unwind_supports_jit():
     if platform.system() in ["Linux", "FreeBSD", "NetBSD"]:
         return True
 
-    # Windows does not support frame info without the ORC runtime.
+    # Windows x86_64 with MinGW (windows-gnu) supports SEH frame registration
+    # via SEHFrameRegistrationPlugin in ORC JITLink. MSVC targets are not yet
+    # supported without the ORC runtime.
     if platform.system() == "Windows":
+        if "windows-gnu" in config.host_triple and "x86_64" in config.host_triple:
+            return True
         return False
 
     # On Darwin/x86-64 clang produces both eh-frames and compact-unwind, and

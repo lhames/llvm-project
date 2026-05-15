@@ -92,15 +92,17 @@ private:
       Base = ImageBase->getAddress();
       PDataRange = jitlink::SectionRange(*PDataSection).getRange();
     } else {
+      return make_error<StringError>(".pdata section present but __ImageBase symbol not found in graph",
+        inconvertibleErrorCode());
       // No __ImageBase. Use the lowest address in this graph as a substitute.
-      for (auto &Sec : G.sections()) {
-        if (Sec.empty())
-          continue;
-        jitlink::SectionRange SR(Sec);
-        Base = std::min(Base, SR.getStart());
-        if (&Sec == PDataSection)
-          PDataRange = SR.getRange();
-      }
+      // for (auto &Sec : G.sections()) {
+      //   if (Sec.empty())
+      //     continue;
+      //   jitlink::SectionRange SR(Sec);
+      //   Base = std::min(Base, SR.getStart());
+      //   if (&Sec == PDataSection)
+      //     PDataRange = SR.getRange();
+      // }
     }
 
     G.allocActions().push_back(
