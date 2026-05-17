@@ -727,9 +727,9 @@ def host_unwind_supports_jit():
     if platform.system() in ["Linux", "FreeBSD", "NetBSD"]:
         return True
 
-    # Windows x86_64 with MinGW (windows-gnu) supports SEH frame registration
-    # via SEHFrameRegistrationPlugin in ORC JITLink. MSVC targets are not yet
-    # supported without the ORC runtime.
+    # Windows x86_64 uses SEH (.pdata/.xdata) with RtlAddFunctionTable
+    # for dynamic registration. Only tested with windows-gnu (MinGW)
+    # so far.
     if platform.system() == "Windows":
         if "windows-gnu" in config.host_triple and "x86_64" in config.host_triple:
             return True
