@@ -271,13 +271,67 @@ public:
   }
 };
 
-// Create GOT entries and PLT stubs in G for calls to external
-// symbols. Returns Error::success() unconditionally.
+// Creates executable stubs for Pointer32NB edges targeting external
+// symbols whose image relative offset from __ImageBase would exceed
+// 32 bits.
+class COFFPointer32NBStubsManager : public llvm::jitlink::TableManager<COFFPointer32NBStubsManager> {
+public:
+  // Returns section name for ADDR32NB stubs in the link graph.
+  static StringRef getSectionName() { return "$__STUBS_ADDR32NB"; }
+
+  // Constructs a stub manager using GOT for indirect jump targets.
+  COFFPointer32NBStubsManager(LinkGraph &, x86_64::GOTTableManager &GOT) : GOT(GOT) {
+  }
+
+  // Checks edge E on block B in graph G. If E is a Pointer32NB
+  // targeting an external, redirects it to a nearby stub. Returns
+  // true if handled.
+  bool visitEdge(LinkGraph &G, Block *B, Edge &E) {
+    if (E.getKind() == EdgeKind_coff_x86_64::Pointer32NB && !E.getTarget().isDefined()) {
+      DEBUG_WITH_TYPE("jitlink", {
+        dbgs() << "  Fixing " << G.getEdgeKindName(E.getKind()) << " edge at "
+               << B->getFixupAddress(E) << " (" << B->getAddress() << " + "
+               << formatv("{0:x}", E.getOffset()) << ")\n";
+      });
+
+      E.setTarget(getEntryForTarget(G, E.getTarget()));
+      return true;
+    }
+    return false;
+  }
+
+  // Creates an executable stub in G that jumps to Target via a GOT
+  // entry.  Returns an anonymous symbol pointing to the stub.
+  Symbol &createEntry(LinkGraph &G, Symbol &Target) {
+    return x86_64::createAnonymousPointerJumpStub(G, getStubsSection(G),
+                                          GOT.getEntryForTarget(G, Target));
+  }
+
+public:
+  // Returns the executable stub section in G, creating it on first
+  // call.
+  Section &getStubsSection(LinkGraph &G) {
+    if (!StubsSection)
+      StubsSection = &G.createSection(getSectionName(),
+                                      orc::MemProt::Read | orc::MemProt::Exec);
+    return *StubsSection;
+  }
+
+  // Shared GOT for indirect jump targets.
+  x86_64::GOTTableManager &GOT;
+  // Lazily created stub section.
+  Section *StubsSection = nullptr;
+};
+
+// Create stubs in G for external references: PLT stubs for calls (PCRel32)
+// and ADDR32NB stubs for image-relative pointers (Pointer32NB). Always succeeds.
 Error buildTables_COFF_x86_64(LinkGraph &G) {
   LLVM_DEBUG(dbgs() << "Visiting edges in graph:\n");
 
   x86_64::GOTTableManager GOT(G);
   x86_64::PLTTableManager PLT(G, GOT);
+  COFFPointer32NBStubsManager COFFPtr32NB(G, GOT);
+
   // Mark calls to externals as BranchPCRel32 so PLTTableManager will create
   // stubs for them. Without this, it ignores COFF's PCRel32 edge kind.
   for (auto *B : G.blocks()) {
@@ -289,7 +343,7 @@ Error buildTables_COFF_x86_64(LinkGraph &G) {
     }
   }
 
-  visitExistingEdges(G, PLT);
+  visitExistingEdges(G, PLT, COFFPtr32NB);
   return Error::success();
 }
 
