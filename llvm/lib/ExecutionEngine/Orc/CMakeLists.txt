@@ -52,6 +52,7 @@ add_llvm_component_library(LLVMOrcJIT
   OrcV2CBindings.cpp
   RTDyldObjectLinkingLayer.cpp
   SectCreate.cpp
+  SEHFrameRegistrationPlugin.cpp
   SelfExecutorProcessControl.cpp
   SimpleRemoteEPC.cpp
   SimpleRemoteMemoryMapper.cpp

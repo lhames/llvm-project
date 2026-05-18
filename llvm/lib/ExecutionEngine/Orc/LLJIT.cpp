@@ -19,6 +19,7 @@
 #include "llvm/ExecutionEngine/Orc/ObjectLinkingLayer.h"
 #include "llvm/ExecutionEngine/Orc/ObjectTransformLayer.h"
 #include "llvm/ExecutionEngine/Orc/RTDyldObjectLinkingLayer.h"
+#include "llvm/ExecutionEngine/Orc/SEHFrameRegistrationPlugin.h"
 #include "llvm/ExecutionEngine/Orc/SelfExecutorProcessControl.h"
 #include "llvm/ExecutionEngine/Orc/TargetProcess/RegisterEHFrames.h"
 #include "llvm/ExecutionEngine/Orc/UnwindInfoRegistrationPlugin.h"
@@ -1276,6 +1277,13 @@ Expected<JITDylibSP> setUpGenericLLVMIRPlatform(LLJIT &J) {
         } else
           return UIRP.takeError();
       }
+    }
+
+    // Register .pdata with the Windows unwinder for SEH support.
+    if (J.getTargetTriple().isOSBinFormatCOFF()) {
+      OLL->addPlugin(std::make_shared<SEHFrameRegistrationPlugin>());
+      LLVM_DEBUG(dbgs() << "Enabled seh-frame support.\n");
+      UseEHFrames = false;
     }
 
     // Otherwise fall back to standard unwind registration.
