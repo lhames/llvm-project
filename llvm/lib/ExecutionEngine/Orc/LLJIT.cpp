@@ -828,10 +828,17 @@ Error LLJITBuilderState::prepareForConstruction() {
       if (!JTMB->getCodeModel())
         JTMB->setCodeModel(CodeModel::Small);
       JTMB->setRelocationModel(Reloc::PIC_);
-      CreateObjectLinkingLayer = [](ExecutionSession &ES,
+      bool IsOSBinFormatCOFF = TT.isOSBinFormatCOFF();
+      CreateObjectLinkingLayer = [IsOSBinFormatCOFF](ExecutionSession &ES,
                                     jitlink::JITLinkMemoryManager &MemMgr)
           -> Expected<std::unique_ptr<ObjectLayer>> {
-        return std::make_unique<ObjectLinkingLayer>(ES, MemMgr);
+        auto ObjectLayer = std::make_unique<ObjectLinkingLayer>(ES, MemMgr);
+        if (IsOSBinFormatCOFF) {
+          // COFF doesn't track symbol visibility, use IR flags as
+          // authoritative, matching RTDyld COFF behavior.
+          ObjectLayer->setOverrideObjectFlagsWithResponsibilityFlags(true);
+        }
+        return std::move(ObjectLayer);
       };
     }
   }
