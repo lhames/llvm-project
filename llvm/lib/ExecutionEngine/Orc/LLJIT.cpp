@@ -14,6 +14,7 @@
 #include "llvm/ExecutionEngine/Orc/EHFrameRegistrationPlugin.h"
 #include "llvm/ExecutionEngine/Orc/ELFNixPlatform.h"
 #include "llvm/ExecutionEngine/Orc/EPCDynamicLibrarySearchGenerator.h"
+#include "llvm/ExecutionEngine/Orc/ExecutionUtils.h"
 #include "llvm/ExecutionEngine/Orc/ExecutorProcessControl.h"
 #include "llvm/ExecutionEngine/Orc/MachOPlatform.h"
 #include "llvm/ExecutionEngine/Orc/ObjectLinkingLayer.h"
@@ -593,6 +594,36 @@ public:
         dbgs() << "InactivePlatformSupport: no deinitializers running for "
                << JD.getName() << "\n");
     return Error::success();
+  }
+};
+
+/// Forwards only `__imp_` prefixed symbols to an inner generator.
+/// Non matching symbols are ignored.
+class ImpSymbolFilterGenerator : public DefinitionGenerator {
+  std::unique_ptr<DefinitionGenerator> Inner;
+
+public:
+  /// Wraps Inner so it only sees `__imp_` prefixed lookups.
+  ImpSymbolFilterGenerator(std::unique_ptr<DefinitionGenerator> Inner)
+      : Inner(std::move(Inner)) {}
+
+  /// Filters Symbols to `__imp_` prefixed entries and forwards the filtered
+  /// set to the inner generator via LS, K, JD, and JDLookupFlags.
+  /// Returns the inner generator's result, or success if no `__imp_` symbols
+  /// are present in Symbols.
+  Error tryToGenerate(LookupState &LS, LookupKind K, JITDylib &JD,
+                      JITDylibLookupFlags JDLookupFlags,
+                      const SymbolLookupSet &Symbols) override {
+    SymbolLookupSet Filtered;
+    for (auto symbol : Symbols) {
+      if ((*symbol.first).starts_with("__imp_"))
+        Filtered.add(symbol.first, symbol.second);
+    }
+
+    if (!Filtered.empty())
+      return Inner->tryToGenerate(LS, K, JD, JDLookupFlags, Filtered);
+    else
+      return Error::success();
   }
 };
 
@@ -1281,6 +1312,12 @@ Expected<JITDylibSP> setUpGenericLLVMIRPlatform(LLJIT &J) {
 
     // Register .pdata with the Windows unwinder for SEH support.
     if (J.getTargetTriple().isOSBinFormatCOFF()) {
+      // Resolve __imp_ symbols (IAT entries) from process DLLs. Filtered
+      // to avoid intercepting e.g. __gxx_personality_seh0 which needs
+      // JITLink's ADDR32NB stub instead.
+      auto DLLImportGen = DLLImportDefinitionGenerator::Create(J.getExecutionSession(), *OLL);
+      PlatformJD.addGenerator(std::make_unique<ImpSymbolFilterGenerator>(std::move(DLLImportGen)));
+
       OLL->addPlugin(std::make_shared<SEHFrameRegistrationPlugin>());
       LLVM_DEBUG(dbgs() << "Enabled seh-frame support.\n");
       UseEHFrames = false;

@@ -1322,8 +1322,6 @@ Session::Session(std::unique_ptr<ExecutorProcessControl> EPC, Error &Err)
         return;
       }
     } else if (TT.isOSBinFormatCOFF()) {
-      if (!NoExec)
-        ObjLayer->addPlugin(std::make_unique<SEHFrameRegistrationPlugin>());
       auto LoadDynLibrary = [&, this](JITDylib &JD,
                                       StringRef DLLName) -> Error {
         if (!DLLName.ends_with_insensitive(".dll"))
@@ -1374,6 +1372,9 @@ Session::Session(std::unique_ptr<ExecutorProcessControl> EPC, Error &Err)
         logAllUnhandledErrors(std::move(TargetSymErr), errs(),
                               "Debugger support not available: ");
     }
+  } else if (TT.isOSBinFormatCOFF()) {
+    if (!NoExec)
+      ObjLayer->addPlugin(std::make_unique<SEHFrameRegistrationPlugin>());
   }
 
   if (auto MainJDOrErr = ES.createJITDylib("main"))
