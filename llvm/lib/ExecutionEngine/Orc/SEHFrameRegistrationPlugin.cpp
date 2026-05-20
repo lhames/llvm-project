@@ -26,6 +26,9 @@ using namespace llvm::jitlink;
 
 namespace llvm::orc {
 
+// Calls RtlAddFunctionTable to register .pdata entries with the OS unwinder.
+// ArgData/ArgSize contain the serialized base address and .pdata range.
+// Returns a serialized error result indicating success or failure.
 shared::CWrapperFunctionBuffer registerPData(const char *ArgData,
                                              size_t ArgSize) {
   using namespace shared;
@@ -61,6 +64,9 @@ shared::CWrapperFunctionBuffer registerPData(const char *ArgData,
           .release();
 }
 
+// Calls RtlDeleteFunctionTable to unregister .pdata entries from the OS unwinder.
+// ArgData/ArgSize contain the serialized .pdata start address.
+// Returns a serialized error result indicating success or failure.
 shared::CWrapperFunctionBuffer deregisterPData(const char *ArgData,
                                                size_t ArgSize) {
   using namespace shared;
@@ -94,29 +100,26 @@ void SEHFrameRegistrationPlugin::modifyPassConfig(
 Error SEHFrameRegistrationPlugin::registerFrameInfo(jitlink::LinkGraph &G) {
   using namespace shared;
 
-  auto *PDataSection = G.findSectionByName(".pdata");
-  if (!PDataSection)
+  auto *ImageBase = jitlink::GetImageBaseSymbol()(G);
+  if (!ImageBase)
     return Error::success();
 
-  ExecutorAddr Base(~uint64_t(0));
-  ExecutorAddrRange PDataRange;
-  if (auto *ImageBase = jitlink::GetImageBaseSymbol()(G)) {
-    // If there's an __ImageBase symbol then use it to get the base address.
-    Base = ImageBase->getAddress();
-    PDataRange = jitlink::SectionRange(*PDataSection).getRange();
-  } else {
-    return make_error<StringError>(
-        ".pdata section present but __ImageBase symbol not found in graph",
-        inconvertibleErrorCode());
+  // Register each .pdata prefixed section (includes COMDAT
+  // .pdata$<suffix>).
+  for (auto &PDataSection : G.sections()) {
+    if (!PDataSection.getName().starts_with(".pdata"))
+      continue;
+
+    ExecutorAddr Base(ImageBase->getAddress());
+    ExecutorAddrRange PDataRange(jitlink::SectionRange(PDataSection).getRange());
+
+    G.allocActions().push_back(
+        {cantFail(WrapperFunctionCall::Create<
+                  SPSArgList<SPSExecutorAddr, SPSExecutorAddrRange>>(
+             ExecutorAddr::fromPtr(&registerPData), Base, PDataRange)),
+         cantFail(WrapperFunctionCall::Create<SPSArgList<SPSExecutorAddr>>(
+             ExecutorAddr::fromPtr(&deregisterPData), PDataRange.Start))});
   }
-
-  G.allocActions().push_back(
-      {cantFail(WrapperFunctionCall::Create<
-                SPSArgList<SPSExecutorAddr, SPSExecutorAddrRange>>(
-           ExecutorAddr::fromPtr(&registerPData), Base, PDataRange)),
-       cantFail(WrapperFunctionCall::Create<SPSArgList<SPSExecutorAddr>>(
-           ExecutorAddr::fromPtr(&deregisterPData), PDataRange.Start))});
-
   return Error::success();
 }
 

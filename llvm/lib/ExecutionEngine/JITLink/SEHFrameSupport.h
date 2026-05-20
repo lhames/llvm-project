@@ -21,39 +21,44 @@
 
 namespace llvm {
 namespace jitlink {
-/// This pass adds keep-alive edge from SEH frame sections
-/// to the parent function content block.
+/// This pass adds keep-alive edges from SEH frame sections
+/// to parent function content blocks.
 class SEHFrameKeepAlivePass {
 public:
-  SEHFrameKeepAlivePass(StringRef SEHFrameSectionName)
-      : SEHFrameSectionName(SEHFrameSectionName) {}
+  /// SEHFrameSectionNamePrefix to match against graph sections
+  SEHFrameKeepAlivePass(StringRef SEHFrameSectionNamePrefix)
+      : SEHFrameSectionNamePrefix(SEHFrameSectionNamePrefix) {}
 
+  /// Adds keep alive edges in G for all sections matching
+  /// SEHFrameSectionNamePrefix
   Error operator()(LinkGraph &G) {
-    auto *S = G.findSectionByName(SEHFrameSectionName);
-    if (!S)
-      return Error::success();
+    for (auto &S : G.sections()) {
+      if (!S.getName().starts_with(SEHFrameSectionNamePrefix))
+        continue;
 
-    // Simply consider every block pointed by seh frame block as parants.
-    // This adds some unnecessary keep-alive edges to unwind info blocks,
-    // (xdata) but these blocks are usually dead by default, so they wouldn't
-    // count for the fate of seh frame block.
-    for (auto *B : S->blocks()) {
-      auto &DummySymbol = G.addAnonymousSymbol(*B, 0, 0, false, false);
-      SetVector<Block *> Children;
-      for (auto &E : B->edges()) {
-        auto &Sym = E.getTarget();
-        if (!Sym.isDefined())
-          continue;
-        Children.insert(&Sym.getBlock());
+      // Simply consider every block pointed by seh frame block as parents.
+      // This adds some unnecessary keep-alive edges to unwind info blocks,
+      // (xdata) but these blocks are usually dead by default, so they wouldn't
+      // count for the fate of seh frame block.
+      for (auto *B : S.blocks()) {
+        auto &DummySymbol = G.addAnonymousSymbol(*B, 0, 0, false, false);
+        SetVector<Block *> Children;
+        for (auto &E : B->edges()) {
+          auto &Sym = E.getTarget();
+          if (!Sym.isDefined())
+            continue;
+          Children.insert(&Sym.getBlock());
+        }
+        for (auto *Child : Children)
+          Child->addEdge(Edge(Edge::KeepAlive, 0, DummySymbol, 0));
       }
-      for (auto *Child : Children)
-        Child->addEdge(Edge(Edge::KeepAlive, 0, DummySymbol, 0));
     }
     return Error::success();
   }
 
 private:
-  StringRef SEHFrameSectionName;
+  /// Sections starting with this prefix are kept alive
+  StringRef SEHFrameSectionNamePrefix;
 };
 
 } // end namespace jitlink
