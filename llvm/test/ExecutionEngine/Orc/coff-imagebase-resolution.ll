@@ -1,7 +1,6 @@
 ; Test that __ImageBase resolves to the correct base address so that
 ; image-relative (ADDR32NB) relocations in .pdata/.xdata produce valid
-; 32-bit offsets. Without the fix, __ImageBase is zero and the offsets
-; overflow, causing a link failure.
+; 32-bit offsets.
 ;
 ; The test compiles a non-leaf function (one that calls another) with the
 ; uwtable attribute. Non-leaf functions require unwind info, so the compiler
