@@ -411,6 +411,9 @@ void link_COFF_x86_64(std::unique_ptr<LinkGraph> G,
 
     // Add COFF edge lowering passes.
     Config.PreFixupPasses.push_back(COFFLinkGraphLowering_x86_64());
+
+    // Add GOT/Stubs optimizer pass.
+    Config.PreFixupPasses.push_back(x86_64::optimizeGOTAndStubAccesses);
   }
 
   if (auto Err = Ctx->modifyPassConfig(*G, Config))
