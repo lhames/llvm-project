@@ -113,6 +113,10 @@ Error SEHFrameRegistrationPlugin::registerFrameInfo(jitlink::LinkGraph &G) {
     ExecutorAddr Base(ImageBase->getAddress());
     ExecutorAddrRange PDataRange(jitlink::SectionRange(PDataSection).getRange());
 
+    // Skip empty sections (e.g. dead-stripped COMDAT .pdata).
+    if (PDataRange.size() == 0)
+      continue;
+
     G.allocActions().push_back(
         {cantFail(WrapperFunctionCall::Create<
                   SPSArgList<SPSExecutorAddr, SPSExecutorAddrRange>>(

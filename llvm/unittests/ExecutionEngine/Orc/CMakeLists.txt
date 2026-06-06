@@ -53,6 +53,7 @@ add_llvm_unittest(OrcJITTests
   JITLinkRedirectionManagerTest.cpp
   LLJITJITLinkSelectionTest.cpp
   ReOptimizeLayerTest.cpp
+  SEHFrameRegistrationPluginTest.cpp
 
   EXPORT_SYMBOLS
   )

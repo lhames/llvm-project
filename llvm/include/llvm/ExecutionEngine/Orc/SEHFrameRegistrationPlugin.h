@@ -42,7 +42,6 @@ public:
   void notifyTransferringResources(JITDylib &JD, ResourceKey DstKey,
                                    ResourceKey SrcKey) override {}
 
-private:
   /// Registers .pdata sections in G with the OS unwinder.
   /// Returns an error if registration setup fails.
   Error registerFrameInfo(jitlink::LinkGraph &G);
