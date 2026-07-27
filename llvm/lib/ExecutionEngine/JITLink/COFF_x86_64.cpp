@@ -27,14 +27,6 @@ using namespace llvm::jitlink;
 
 namespace {
 
-enum EdgeKind_coff_x86_64 : Edge::Kind {
-  PCRel32 = x86_64::FirstPlatformRelocation,
-  Pointer32NB,
-  Pointer64,
-  SectionIdx16,
-  SecRel32,
-};
-
 class COFFJITLinker_x86_64 : public JITLinker<COFFJITLinker_x86_64> {
   friend class JITLinker<COFFJITLinker_x86_64>;
 
@@ -100,52 +92,52 @@ private:
     case COFF::RelocationTypeAMD64::IMAGE_REL_AMD64_ADDR32NB: {
       if (!ImageBase)
         ImageBase = &addImageBaseSymbol();
-      Kind = EdgeKind_coff_x86_64::Pointer32NB;
+      Kind = x86_64::Pointer32NB;
       Addend = *reinterpret_cast<const support::little32_t *>(FixupPtr);
       break;
     }
     case COFF::RelocationTypeAMD64::IMAGE_REL_AMD64_REL32: {
-      Kind = EdgeKind_coff_x86_64::PCRel32;
+      Kind = x86_64::PCRel32;
       Addend = *reinterpret_cast<const support::little32_t *>(FixupPtr);
       break;
     }
     case COFF::RelocationTypeAMD64::IMAGE_REL_AMD64_REL32_1: {
-      Kind = EdgeKind_coff_x86_64::PCRel32;
+      Kind = x86_64::PCRel32;
       Addend = *reinterpret_cast<const support::little32_t *>(FixupPtr);
       Addend -= 1;
       break;
     }
     case COFF::RelocationTypeAMD64::IMAGE_REL_AMD64_REL32_2: {
-      Kind = EdgeKind_coff_x86_64::PCRel32;
+      Kind = x86_64::PCRel32;
       Addend = *reinterpret_cast<const support::little32_t *>(FixupPtr);
       Addend -= 2;
       break;
     }
     case COFF::RelocationTypeAMD64::IMAGE_REL_AMD64_REL32_3: {
-      Kind = EdgeKind_coff_x86_64::PCRel32;
+      Kind = x86_64::PCRel32;
       Addend = *reinterpret_cast<const support::little32_t *>(FixupPtr);
       Addend -= 3;
       break;
     }
     case COFF::RelocationTypeAMD64::IMAGE_REL_AMD64_REL32_4: {
-      Kind = EdgeKind_coff_x86_64::PCRel32;
+      Kind = x86_64::PCRel32;
       Addend = *reinterpret_cast<const support::little32_t *>(FixupPtr);
       Addend -= 4;
       break;
     }
     case COFF::RelocationTypeAMD64::IMAGE_REL_AMD64_REL32_5: {
-      Kind = EdgeKind_coff_x86_64::PCRel32;
+      Kind = x86_64::PCRel32;
       Addend = *reinterpret_cast<const support::little32_t *>(FixupPtr);
       Addend -= 5;
       break;
     }
     case COFF::RelocationTypeAMD64::IMAGE_REL_AMD64_ADDR64: {
-      Kind = EdgeKind_coff_x86_64::Pointer64;
+      Kind = x86_64::Pointer64;
       Addend = *reinterpret_cast<const support::little64_t *>(FixupPtr);
       break;
     }
     case COFF::RelocationTypeAMD64::IMAGE_REL_AMD64_SECTION: {
-      Kind = EdgeKind_coff_x86_64::SectionIdx16;
+      Kind = x86_64::SectionIdx16;
       Addend = *reinterpret_cast<const support::little16_t *>(FixupPtr);
       uint64_t SectionIdx = 0;
       if (COFFSymbol.isAbsolute())
@@ -163,7 +155,7 @@ private:
       // FIXME: SECREL to external symbol should be handled
       if (!GraphSymbol->isDefined())
         return Error::success();
-      Kind = EdgeKind_coff_x86_64::SecRel32;
+      Kind = x86_64::SecRel32;
       Addend = *reinterpret_cast<const support::little32_t *>(FixupPtr);
       break;
     }
@@ -201,26 +193,18 @@ public:
     for (auto *B : G.blocks()) {
       for (auto &E : B->edges()) {
         switch (E.getKind()) {
-        case EdgeKind_coff_x86_64::Pointer32NB: {
+        case x86_64::Pointer32NB: {
           auto ImageBase = GetImageBase(G);
           assert(ImageBase && "__ImageBase symbol must be defined");
           E.setAddend(E.getAddend() - ImageBase->getAddress().getValue());
           E.setKind(x86_64::Pointer32);
           break;
         }
-        case EdgeKind_coff_x86_64::PCRel32: {
-          E.setKind(x86_64::PCRel32);
-          break;
-        }
-        case EdgeKind_coff_x86_64::Pointer64: {
-          E.setKind(x86_64::Pointer64);
-          break;
-        }
-        case EdgeKind_coff_x86_64::SectionIdx16: {
+        case x86_64::SectionIdx16: {
           E.setKind(x86_64::Pointer16);
           break;
         }
-        case EdgeKind_coff_x86_64::SecRel32: {
+        case x86_64::SecRel32: {
           E.setAddend(E.getAddend() -
                       getSectionStart(E.getTarget().getSection()).getValue());
           E.setKind(x86_64::Pointer32);
@@ -287,7 +271,7 @@ public:
   // targeting an external, redirects it to a nearby stub. Returns
   // true if handled.
   bool visitEdge(LinkGraph &G, Block *B, Edge &E) {
-    if (E.getKind() == EdgeKind_coff_x86_64::Pointer32NB && !E.getTarget().isDefined()) {
+    if (E.getKind() == x86_64::Pointer32NB && !E.getTarget().isDefined()) {
       DEBUG_WITH_TYPE("jitlink", {
         dbgs() << "  Fixing " << G.getEdgeKindName(E.getKind()) << " edge at "
                << B->getFixupAddress(E) << " (" << B->getAddress() << " + "
@@ -336,7 +320,7 @@ Error buildTables_COFF_x86_64(LinkGraph &G) {
   // stubs for them. Without this, it ignores COFF's PCRel32 edge kind.
   for (auto *B : G.blocks()) {
     for (auto &E : B->edges()) {
-      if (E.getKind() == EdgeKind_coff_x86_64::PCRel32 &&
+      if (E.getKind() == x86_64::PCRel32 &&
           !E.getTarget().isDefined()) {
         E.setKind(x86_64::BranchPCRel32);
       }
@@ -354,20 +338,7 @@ namespace jitlink {
 
 /// Return the string name of the given COFF x86_64 edge kind.
 const char *getCOFFX86RelocationKindName(Edge::Kind R) {
-  switch (R) {
-  case PCRel32:
-    return "PCRel32";
-  case Pointer32NB:
-    return "Pointer32NB";
-  case Pointer64:
-    return "Pointer64";
-  case SectionIdx16:
-    return "SectionIdx16";
-  case SecRel32:
-    return "SecRel32";
-  default:
-    return x86_64::getEdgeKindName(R);
-  }
+  return x86_64::getEdgeKindName(R);
 }
 
 Expected<std::unique_ptr<LinkGraph>> createLinkGraphFromCOFFObject_x86_64(
