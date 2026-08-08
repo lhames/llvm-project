@@ -26,6 +26,13 @@ namespace jitlink {
 Expected<std::unique_ptr<LinkGraph>> createLinkGraphFromCOFFObject_x86_64(
     MemoryBufferRef ObjectBuffer, std::shared_ptr<orc::SymbolStringPool> SSP);
 
+/// Create stubs in G for external references: PLT stubs for calls (PCRel32)
+/// and ADDR32NB stubs for image-relative pointers (Pointer32NB). Always succeeds.
+Error buildTables_COFF_x86_64(LinkGraph &G);
+
+/// Synthesize IAT entries for undefined __imp_X externals in G. Always succeeds.
+Error synthesizeIATEntries_COFF_x86_64(LinkGraph &G);
+
 /// jit-link the given object buffer, which must be a COFF x86-64 object file.
 void link_COFF_x86_64(std::unique_ptr<LinkGraph> G,
                       std::unique_ptr<JITLinkContext> Ctx);

@@ -307,6 +307,11 @@ public:
   Section *StubsSection = nullptr;
 };
 
+} // namespace
+
+namespace llvm {
+namespace jitlink {
+
 // Create stubs in G for external references: PLT stubs for calls (PCRel32)
 // and ADDR32NB stubs for image-relative pointers (Pointer32NB). Always succeeds.
 Error buildTables_COFF_x86_64(LinkGraph &G) {
@@ -403,11 +408,6 @@ Error synthesizeIATEntries_COFF_x86_64(LinkGraph &G) {
 
   return Error::success();
 }
-
-} // namespace
-
-namespace llvm {
-namespace jitlink {
 
 /// Return the string name of the given COFF x86_64 edge kind.
 const char *getCOFFX86RelocationKindName(Edge::Kind R) {
