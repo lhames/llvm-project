@@ -343,31 +343,10 @@ bool LLVMUserExpression::PrepareToExecuteJITExpression(
 
     struct_address = m_materialized_address;
 
-    if (m_can_interpret && m_stack_frame_bottom == LLDB_INVALID_ADDRESS) {
-      size_t stack_frame_size = target->GetExprAllocSize();
-      if (stack_frame_size == 0) {
-        ABISP abi_sp;
-        if (process && (abi_sp = process->GetABI()))
-          stack_frame_size = abi_sp->GetStackFrameSize();
-        else
-          stack_frame_size = 512 * 1024;
-      }
-
-      const bool zero_memory = false;
-      if (auto address_or_error = m_execution_unit_sp->Malloc(
-              stack_frame_size, 8,
-              lldb::ePermissionsReadable | lldb::ePermissionsWritable,
-              IRMemoryMap::eAllocationPolicyHostOnly, zero_memory)) {
-        m_stack_frame_bottom = *address_or_error;
-        m_stack_frame_top = m_stack_frame_bottom + stack_frame_size;
-      } else {
-        diagnostic_manager.Printf(
-            lldb::eSeverityError,
-            "Couldn't allocate space for the stack frame: %s",
-            toString(address_or_error.takeError()).c_str());
-        return false;
-      }
-    }
+    if (m_can_interpret &&
+        !AllocateInterpreterStackFrame(diagnostic_manager, *target,
+                                       process.get()))
+      return false;
 
     Status materialize_error;
 
@@ -382,4 +361,34 @@ bool LLVMUserExpression::PrepareToExecuteJITExpression(
     }
   }
   return true;
+}
+
+bool LLVMUserExpression::AllocateInterpreterStackFrame(
+    DiagnosticManager &diagnostic_manager, Target &target, Process *process) {
+  if (m_stack_frame_bottom != LLDB_INVALID_ADDRESS)
+    return true;
+
+  size_t stack_frame_size = target.GetExprAllocSize();
+  if (stack_frame_size == 0) {
+    ABISP abi_sp;
+    if (process && (abi_sp = process->GetABI()))
+      stack_frame_size = abi_sp->GetStackFrameSize();
+    else
+      stack_frame_size = 512 * 1024;
+  }
+
+  const bool zero_memory = false;
+  if (auto address_or_error = m_execution_unit_sp->Malloc(
+          stack_frame_size, 8,
+          lldb::ePermissionsReadable | lldb::ePermissionsWritable,
+          IRMemoryMap::eAllocationPolicyHostOnly, zero_memory)) {
+    m_stack_frame_bottom = *address_or_error;
+    m_stack_frame_top = m_stack_frame_bottom + stack_frame_size;
+    return true;
+  } else {
+    diagnostic_manager.Printf(
+        lldb::eSeverityError, "Couldn't allocate space for the stack frame: %s",
+        toString(address_or_error.takeError()).c_str());
+    return false;
+  }
 }

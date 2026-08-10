@@ -111,6 +111,12 @@ protected:
                                        ///to the expression have been
                                        ///materialized.
   Materializer::DematerializerSP m_dematerializer_sp; ///< The dematerializer.
+
+private:
+  /// Allocate the interpreter's private, host-only scratch stack, if one
+  /// hasn't already been allocated. Idempotent.
+  bool AllocateInterpreterStackFrame(DiagnosticManager &diagnostic_manager,
+                                     Target &target, Process *process);
 };
 
 } // namespace lldb_private
