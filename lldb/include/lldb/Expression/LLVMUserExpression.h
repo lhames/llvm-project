@@ -13,6 +13,7 @@
 #include <string>
 #include <vector>
 
+#include "llvm/ADT/ArrayRef.h"
 #include "llvm/IR/LegacyPassManager.h"
 
 #include "lldb/Expression/UserExpression.h"
@@ -113,20 +114,20 @@ protected:
   Materializer::DematerializerSP m_dematerializer_sp; ///< The dematerializer.
 
 private:
-  /// Run the expression by interpreting its IR directly. \p struct_address
-  /// is the address of the already-materialized arguments struct.
+  /// Run the expression by interpreting its IR directly. \p args is the
+  /// already-built argument list for the expression's wrapper function.
   lldb::ExpressionResults
-  RunInterpreted(lldb::addr_t struct_address, ExecutionContext &exe_ctx,
-                const EvaluateExpressionOptions &options,
-                DiagnosticManager &diagnostic_manager,
-                lldb::addr_t &function_stack_bottom,
-                lldb::addr_t &function_stack_top);
+  RunInterpreted(llvm::ArrayRef<lldb::addr_t> args, ExecutionContext &exe_ctx,
+                 const EvaluateExpressionOptions &options,
+                 DiagnosticManager &diagnostic_manager,
+                 lldb::addr_t &function_stack_bottom,
+                 lldb::addr_t &function_stack_top);
 
   /// Run the expression by executing its JIT-compiled code in the target
-  /// process via a ThreadPlan. \p struct_address is the address of the
-  /// already-materialized arguments struct.
+  /// process via a ThreadPlan. \p args is the already-built argument list for
+  /// the expression's wrapper function.
   lldb::ExpressionResults RunUsingThreadPlan(
-      lldb::addr_t struct_address, ExecutionContext &exe_ctx,
+      llvm::ArrayRef<lldb::addr_t> args, ExecutionContext &exe_ctx,
       const EvaluateExpressionOptions &options,
       DiagnosticManager &diagnostic_manager,
       lldb::UserExpressionSP &shared_ptr_to_me,

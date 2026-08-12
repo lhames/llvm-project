@@ -85,17 +85,25 @@ LLVMUserExpression::DoExecute(DiagnosticManager &diagnostic_manager,
     return lldb::eExpressionSetupError;
   }
 
+  std::vector<lldb::addr_t> args;
+
+  if (!AddArguments(exe_ctx, args, struct_address, diagnostic_manager)) {
+    diagnostic_manager.Printf(lldb::eSeverityError,
+                              "errored out in %s, couldn't AddArguments",
+                              __FUNCTION__);
+    return lldb::eExpressionSetupError;
+  }
+
   lldb::addr_t function_stack_bottom = LLDB_INVALID_ADDRESS;
   lldb::addr_t function_stack_top = LLDB_INVALID_ADDRESS;
 
   lldb::ExpressionResults execution_result =
       m_can_interpret
-          ? RunInterpreted(struct_address, exe_ctx, options,
-                           diagnostic_manager, function_stack_bottom,
-                           function_stack_top)
-          : RunUsingThreadPlan(struct_address, exe_ctx, options,
-                               diagnostic_manager, shared_ptr_to_me,
-                               function_stack_bottom, function_stack_top);
+          ? RunInterpreted(args, exe_ctx, options, diagnostic_manager,
+                           function_stack_bottom, function_stack_top)
+          : RunUsingThreadPlan(args, exe_ctx, options, diagnostic_manager,
+                               shared_ptr_to_me, function_stack_bottom,
+                               function_stack_top);
 
   if (execution_result != lldb::eExpressionCompleted)
     return execution_result;
@@ -108,10 +116,10 @@ LLVMUserExpression::DoExecute(DiagnosticManager &diagnostic_manager,
 }
 
 lldb::ExpressionResults LLVMUserExpression::RunInterpreted(
-    lldb::addr_t struct_address, ExecutionContext &exe_ctx,
+    llvm::ArrayRef<lldb::addr_t> args, ExecutionContext &exe_ctx,
     const EvaluateExpressionOptions &options,
-    DiagnosticManager &diagnostic_manager,
-    lldb::addr_t &function_stack_bottom, lldb::addr_t &function_stack_top) {
+    DiagnosticManager &diagnostic_manager, lldb::addr_t &function_stack_bottom,
+    lldb::addr_t &function_stack_top) {
   llvm::Module *module = m_execution_unit_sp->GetModule();
   llvm::Function *function = m_execution_unit_sp->GetFunction();
 
@@ -122,15 +130,6 @@ lldb::ExpressionResults LLVMUserExpression::RunInterpreted(
   }
 
   Status interpreter_error;
-
-  std::vector<lldb::addr_t> args;
-
-  if (!AddArguments(exe_ctx, args, struct_address, diagnostic_manager)) {
-    diagnostic_manager.Printf(lldb::eSeverityError,
-                              "errored out in %s, couldn't AddArguments",
-                              __FUNCTION__);
-    return lldb::eExpressionSetupError;
-  }
 
   function_stack_bottom = m_stack_frame_bottom;
   function_stack_top = m_stack_frame_top;
@@ -150,7 +149,7 @@ lldb::ExpressionResults LLVMUserExpression::RunInterpreted(
 }
 
 lldb::ExpressionResults LLVMUserExpression::RunUsingThreadPlan(
-    lldb::addr_t struct_address, ExecutionContext &exe_ctx,
+    llvm::ArrayRef<lldb::addr_t> args, ExecutionContext &exe_ctx,
     const EvaluateExpressionOptions &options,
     DiagnosticManager &diagnostic_manager,
     lldb::UserExpressionSP &shared_ptr_to_me,
@@ -172,15 +171,6 @@ lldb::ExpressionResults LLVMUserExpression::RunUsingThreadPlan(
   lldb::tid_t expr_thread_id = exe_ctx.GetThreadRef().GetID();
 
   Address wrapper_address(m_jit_start_addr);
-
-  std::vector<lldb::addr_t> args;
-
-  if (!AddArguments(exe_ctx, args, struct_address, diagnostic_manager)) {
-    diagnostic_manager.Printf(lldb::eSeverityError,
-                              "errored out in %s, couldn't AddArguments",
-                              __FUNCTION__);
-    return lldb::eExpressionSetupError;
-  }
 
   lldb::ThreadPlanSP call_plan_sp(new ThreadPlanCallUserExpression(
       exe_ctx.GetThreadRef(), wrapper_address, args, options,
