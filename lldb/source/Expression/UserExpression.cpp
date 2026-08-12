@@ -110,13 +110,27 @@ lldb::ValueObjectSP UserExpression::GetObjectPointerValueObject(
     return {};
   }
 
+  lldb::VariableSP var_sp;
   if (auto var_list_sp = frame_sp->GetInScopeVariableList(false))
-    if (auto var_sp =
-            var_list_sp->FindVariable(ConstString(object_name), false))
-      return frame_sp->GetValueObjectForFrameVariable(var_sp,
-                                                      lldb::eNoDynamicValues);
+    var_sp = var_list_sp->FindVariable(ConstString(object_name), false);
 
-  return {};
+  if (!var_sp) {
+    err = Status::FromErrorStringWithFormatv(
+        "Couldn't load '{0}' because it isn't in scope", object_name);
+    return {};
+  }
+
+  lldb::ValueObjectSP valobj_sp =
+      frame_sp->GetValueObjectForFrameVariable(var_sp, lldb::eNoDynamicValues);
+
+  if (!valobj_sp) {
+    err = Status::FromErrorStringWithFormatv(
+        "Couldn't load '{0}' because its value couldn't be retrieved",
+        object_name);
+    return {};
+  }
+
+  return valobj_sp;
 }
 
 lldb::addr_t UserExpression::GetObjectPointer(lldb::StackFrameSP frame_sp,
