@@ -609,9 +609,13 @@ bool ClangUserExpression::TryParse(
   //
 
   {
+    // The execution unit records the decision; this local is only here to
+    // satisfy the parser's out-parameter.
+    bool can_interpret = false;
+
     Status jit_error = m_parser->PrepareForExecution(
         m_jit_start_addr, m_jit_end_addr, m_execution_unit_sp, exe_ctx,
-        m_can_interpret, execution_policy);
+        can_interpret, execution_policy);
 
     if (!jit_error.Success()) {
       const char *error_cstr = jit_error.AsCString();

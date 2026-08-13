@@ -1672,5 +1672,11 @@ lldb_private::Status ClangExpressionParser::DoPrepareForExecution(
     execution_unit_sp->GetRunnableInfo(err, func_addr, func_end);
   }
 
+  // Record how the expression is going to be evaluated, so that clients can
+  // ask the execution unit rather than tracking it themselves. Note that
+  // can_interpret keeps its incoming value on the paths above that never
+  // consult IRInterpreter::CanInterpret.
+  execution_unit_sp->SetWillInterpret(can_interpret);
+
   return err;
 }

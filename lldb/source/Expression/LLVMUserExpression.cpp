@@ -49,8 +49,11 @@ LLVMUserExpression::LLVMUserExpression(ExecutionContextScope &exe_scope,
     : UserExpression(exe_scope, expr, prefix, language, desired_type, options),
       m_allow_cxx(false), m_allow_objc(false), m_transformed_text(),
       m_execution_unit_sp(), m_materializer_up(), m_jit_module_wp(),
-      m_target(nullptr), m_can_interpret(false),
-      m_materialized_address(LLDB_INVALID_ADDRESS) {}
+      m_target(nullptr), m_materialized_address(LLDB_INVALID_ADDRESS) {}
+
+bool LLVMUserExpression::CanInterpret() {
+  return m_execution_unit_sp && m_execution_unit_sp->WillInterpret();
+}
 
 LLVMUserExpression::~LLVMUserExpression() {
   if (m_target) {
@@ -66,7 +69,7 @@ LLVMUserExpression::DoExecute(DiagnosticManager &diagnostic_manager,
                               const EvaluateExpressionOptions &options,
                               lldb::UserExpressionSP &shared_ptr_to_me,
                               lldb::ExpressionVariableSP &result_sp) {
-  if (m_jit_start_addr == LLDB_INVALID_ADDRESS && !m_can_interpret) {
+  if (m_jit_start_addr == LLDB_INVALID_ADDRESS && !CanInterpret()) {
     diagnostic_manager.PutString(
         lldb::eSeverityError,
         "Expression can't be run, because there is no JIT compiled function");
@@ -97,7 +100,7 @@ LLVMUserExpression::DoExecute(DiagnosticManager &diagnostic_manager,
   lldb::addr_t function_stack_top = LLDB_INVALID_ADDRESS;
 
   lldb::ExpressionResults execution_result =
-      m_can_interpret
+      CanInterpret()
           ? RunInterpreted(args, exe_ctx, options, diagnostic_manager,
                            function_stack_bottom, function_stack_top)
           : RunUsingThreadPlan(args, exe_ctx, options, diagnostic_manager,
@@ -335,11 +338,11 @@ bool LLVMUserExpression::PrepareToExecuteJITExpression(
     return false;
   }
 
-  if (m_jit_start_addr != LLDB_INVALID_ADDRESS || m_can_interpret) {
+  if (m_jit_start_addr != LLDB_INVALID_ADDRESS || CanInterpret()) {
     if (!AllocateArgumentStruct(diagnostic_manager, struct_address))
       return false;
 
-    if (m_can_interpret &&
+    if (CanInterpret() &&
         !m_execution_unit_sp->AllocateInterpreterStackFrame(
             diagnostic_manager, *target, process.get()))
       return false;
@@ -363,7 +366,7 @@ bool LLVMUserExpression::AllocateArgumentStruct(
     DiagnosticManager &diagnostic_manager, lldb::addr_t &struct_address) {
   if (m_materialized_address == LLDB_INVALID_ADDRESS) {
     IRMemoryMap::AllocationPolicy policy =
-        m_can_interpret ? IRMemoryMap::eAllocationPolicyHostOnly
+        CanInterpret() ? IRMemoryMap::eAllocationPolicyHostOnly
                         : IRMemoryMap::eAllocationPolicyMirror;
 
     const bool zero_memory = false;

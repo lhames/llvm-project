@@ -64,7 +64,10 @@ public:
       lldb::addr_t function_stack_bottom = LLDB_INVALID_ADDRESS,
       lldb::addr_t function_stack_top = LLDB_INVALID_ADDRESS) override;
 
-  bool CanInterpret() override { return m_can_interpret; }
+  /// True if this expression will be evaluated by interpreting its IR rather
+  /// than by running JITted code in the target. Answered by the execution
+  /// unit, which records the decision when the expression is prepared.
+  bool CanInterpret() override;
 
   Materializer *GetMaterializer() override { return m_materializer_up.get(); }
 
@@ -102,8 +105,6 @@ protected:
   Target *m_target; ///< The target for storing persistent data like types and
                     ///variables.
 
-  bool m_can_interpret; ///< True if the expression could be evaluated
-                        ///statically; false otherwise.
   lldb::addr_t m_materialized_address; ///< The address at which the arguments
                                        ///to the expression have been
                                        ///materialized.

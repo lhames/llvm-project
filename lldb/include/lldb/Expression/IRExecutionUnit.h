@@ -79,6 +79,16 @@ public:
   void GetRunnableInfo(Status &error, lldb::addr_t &func_addr,
                        lldb::addr_t &func_end);
 
+  /// Record how this expression is going to be evaluated. Set by the
+  /// expression parser once it knows whether the IR can be interpreted.
+  void SetWillInterpret(bool will_interpret) {
+    m_will_interpret = will_interpret;
+  }
+
+  /// True if this expression will be evaluated by interpreting its IR, false
+  /// if it will be evaluated by running JITted code in the target.
+  bool WillInterpret() const { return m_will_interpret; }
+
   /// Allocate the interpreter's private, host-only scratch stack, if one
   /// hasn't already been allocated. Idempotent.
   bool AllocateInterpreterStackFrame(DiagnosticManager &diagnostic_manager,
@@ -407,6 +417,10 @@ private:
   std::vector<ConstString> m_failed_lookups;
 
   std::atomic<bool> m_did_jit;
+
+  /// True if this expression is evaluated by interpreting its IR rather than
+  /// by running JITted code in the target.
+  bool m_will_interpret;
 
   lldb::addr_t m_function_load_addr;
   lldb::addr_t m_function_end_load_addr;
