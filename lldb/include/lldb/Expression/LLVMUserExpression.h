@@ -88,10 +88,6 @@ protected:
                             lldb::addr_t struct_address,
                             DiagnosticManager &diagnostic_manager) = 0;
 
-  lldb::addr_t
-      m_stack_frame_bottom;       ///< The bottom of the allocated stack frame.
-  lldb::addr_t m_stack_frame_top; ///< The top of the allocated stack frame.
-
   bool m_allow_cxx;  ///< True if the language allows C++.
   bool m_allow_objc; ///< True if the language allows Objective-C.
   std::string
@@ -137,11 +133,6 @@ private:
   /// hasn't already been allocated. Idempotent.
   bool AllocateArgumentStruct(DiagnosticManager &diagnostic_manager,
                               lldb::addr_t &struct_address);
-
-  /// Allocate the interpreter's private, host-only scratch stack, if one
-  /// hasn't already been allocated. Idempotent.
-  bool AllocateInterpreterStackFrame(DiagnosticManager &diagnostic_manager,
-                                     Target &target, Process *process);
 };
 
 } // namespace lldb_private

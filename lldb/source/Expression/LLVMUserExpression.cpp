@@ -47,11 +47,10 @@ LLVMUserExpression::LLVMUserExpression(ExecutionContextScope &exe_scope,
                                        ResultType desired_type,
                                        const EvaluateExpressionOptions &options)
     : UserExpression(exe_scope, expr, prefix, language, desired_type, options),
-      m_stack_frame_bottom(LLDB_INVALID_ADDRESS),
-      m_stack_frame_top(LLDB_INVALID_ADDRESS), m_allow_cxx(false),
-      m_allow_objc(false), m_transformed_text(), m_execution_unit_sp(),
-      m_materializer_up(), m_jit_module_wp(), m_target(nullptr),
-      m_can_interpret(false), m_materialized_address(LLDB_INVALID_ADDRESS) {}
+      m_allow_cxx(false), m_allow_objc(false), m_transformed_text(),
+      m_execution_unit_sp(), m_materializer_up(), m_jit_module_wp(),
+      m_target(nullptr), m_can_interpret(false),
+      m_materialized_address(LLDB_INVALID_ADDRESS) {}
 
 LLVMUserExpression::~LLVMUserExpression() {
   if (m_target) {
@@ -131,8 +130,8 @@ lldb::ExpressionResults LLVMUserExpression::RunInterpreted(
 
   Status interpreter_error;
 
-  function_stack_bottom = m_stack_frame_bottom;
-  function_stack_top = m_stack_frame_top;
+  function_stack_bottom = m_execution_unit_sp->GetInterpreterStackBottom();
+  function_stack_top = m_execution_unit_sp->GetInterpreterStackTop();
 
   IRInterpreter::Interpret(*module, *function, args, *m_execution_unit_sp,
                            interpreter_error, function_stack_bottom,
@@ -341,8 +340,8 @@ bool LLVMUserExpression::PrepareToExecuteJITExpression(
       return false;
 
     if (m_can_interpret &&
-        !AllocateInterpreterStackFrame(diagnostic_manager, *target,
-                                       process.get()))
+        !m_execution_unit_sp->AllocateInterpreterStackFrame(
+            diagnostic_manager, *target, process.get()))
       return false;
 
     Status materialize_error;
@@ -385,34 +384,4 @@ bool LLVMUserExpression::AllocateArgumentStruct(
 
   struct_address = m_materialized_address;
   return true;
-}
-
-bool LLVMUserExpression::AllocateInterpreterStackFrame(
-    DiagnosticManager &diagnostic_manager, Target &target, Process *process) {
-  if (m_stack_frame_bottom != LLDB_INVALID_ADDRESS)
-    return true;
-
-  size_t stack_frame_size = target.GetExprAllocSize();
-  if (stack_frame_size == 0) {
-    ABISP abi_sp;
-    if (process && (abi_sp = process->GetABI()))
-      stack_frame_size = abi_sp->GetStackFrameSize();
-    else
-      stack_frame_size = 512 * 1024;
-  }
-
-  const bool zero_memory = false;
-  if (auto address_or_error = m_execution_unit_sp->Malloc(
-          stack_frame_size, 8,
-          lldb::ePermissionsReadable | lldb::ePermissionsWritable,
-          IRMemoryMap::eAllocationPolicyHostOnly, zero_memory)) {
-    m_stack_frame_bottom = *address_or_error;
-    m_stack_frame_top = m_stack_frame_bottom + stack_frame_size;
-    return true;
-  } else {
-    diagnostic_manager.Printf(
-        lldb::eSeverityError, "Couldn't allocate space for the stack frame: %s",
-        toString(address_or_error.takeError()).c_str());
-    return false;
-  }
 }

@@ -21,6 +21,7 @@
 #include "lldb/Core/Disassembler.h"
 #include "lldb/Core/Module.h"
 #include "lldb/Core/Section.h"
+#include "lldb/Expression/DiagnosticManager.h"
 #include "lldb/Expression/Expression.h"
 #include "lldb/Expression/IRExecutionUnit.h"
 #include "lldb/Expression/ObjectFileJIT.h"
@@ -29,9 +30,11 @@
 #include "lldb/Symbol/SymbolContext.h"
 #include "lldb/Symbol/SymbolFile.h"
 #include "lldb/Symbol/SymbolVendor.h"
+#include "lldb/Target/ABI.h"
 #include "lldb/Target/ExecutionContext.h"
 #include "lldb/Target/Language.h"
 #include "lldb/Target/LanguageRuntime.h"
+#include "lldb/Target/Process.h"
 #include "lldb/Target/Target.h"
 #include "lldb/Utility/DataBufferHeap.h"
 #include "lldb/Utility/DataExtractor.h"
@@ -55,7 +58,39 @@ IRExecutionUnit::IRExecutionUnit(std::unique_ptr<llvm::LLVMContext> &context_up,
       m_cpu_features(cpu_features), m_name(name), m_sym_ctx(sym_ctx),
       m_did_jit(false), m_function_load_addr(LLDB_INVALID_ADDRESS),
       m_function_end_load_addr(LLDB_INVALID_ADDRESS),
+      m_interpreter_stack_bottom(LLDB_INVALID_ADDRESS),
+      m_interpreter_stack_top(LLDB_INVALID_ADDRESS),
       m_reported_allocations(false), m_preferred_modules() {}
+
+bool IRExecutionUnit::AllocateInterpreterStackFrame(
+    DiagnosticManager &diagnostic_manager, Target &target, Process *process) {
+  if (m_interpreter_stack_bottom != LLDB_INVALID_ADDRESS)
+    return true;
+
+  size_t stack_frame_size = target.GetExprAllocSize();
+  if (stack_frame_size == 0) {
+    lldb::ABISP abi_sp;
+    if (process && (abi_sp = process->GetABI()))
+      stack_frame_size = abi_sp->GetStackFrameSize();
+    else
+      stack_frame_size = 512 * 1024;
+  }
+
+  const bool zero_memory = false;
+  if (auto address_or_error =
+          Malloc(stack_frame_size, 8,
+                 lldb::ePermissionsReadable | lldb::ePermissionsWritable,
+                 IRMemoryMap::eAllocationPolicyHostOnly, zero_memory)) {
+    m_interpreter_stack_bottom = *address_or_error;
+    m_interpreter_stack_top = m_interpreter_stack_bottom + stack_frame_size;
+    return true;
+  } else {
+    diagnostic_manager.Printf(lldb::eSeverityError,
+                              "Couldn't allocate space for the stack frame: %s",
+                              toString(address_or_error.takeError()).c_str());
+    return false;
+  }
+}
 
 lldb::addr_t IRExecutionUnit::WriteNow(const uint8_t *bytes, size_t size,
                                        Status &error) {

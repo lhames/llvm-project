@@ -79,6 +79,23 @@ public:
   void GetRunnableInfo(Status &error, lldb::addr_t &func_addr,
                        lldb::addr_t &func_end);
 
+  /// Allocate the interpreter's private, host-only scratch stack, if one
+  /// hasn't already been allocated. Idempotent.
+  bool AllocateInterpreterStackFrame(DiagnosticManager &diagnostic_manager,
+                                     Target &target, Process *process);
+
+  /// The bottom of the interpreter's scratch stack, or LLDB_INVALID_ADDRESS if
+  /// it hasn't been allocated.
+  lldb::addr_t GetInterpreterStackBottom() const {
+    return m_interpreter_stack_bottom;
+  }
+
+  /// The top of the interpreter's scratch stack, or LLDB_INVALID_ADDRESS if it
+  /// hasn't been allocated.
+  lldb::addr_t GetInterpreterStackTop() const {
+    return m_interpreter_stack_top;
+  }
+
   /// Accessors for IRForTarget and other clients that may want binary data
   /// placed on their behalf.  The binary data is owned by the IRExecutionUnit
   /// unless the client explicitly chooses to free it.
@@ -393,6 +410,11 @@ private:
 
   lldb::addr_t m_function_load_addr;
   lldb::addr_t m_function_end_load_addr;
+
+  /// The interpreter's private, host-only scratch stack. Only allocated when
+  /// the expression is interpreted rather than JITted.
+  lldb::addr_t m_interpreter_stack_bottom;
+  lldb::addr_t m_interpreter_stack_top;
 
   bool m_strip_underscore = true; ///< True for platforms where global symbols
                                   ///  have a _ prefix
