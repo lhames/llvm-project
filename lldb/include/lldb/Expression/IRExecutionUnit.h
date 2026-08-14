@@ -153,14 +153,6 @@ public:
     return m_interpreter_stack_top;
   }
 
-  /// Accessors for IRForTarget and other clients that may want binary data
-  /// placed on their behalf.  The binary data is owned by the IRExecutionUnit
-  /// unless the client explicitly chooses to free it.
-
-  lldb::addr_t WriteNow(const uint8_t *bytes, size_t size, Status &error);
-
-  void FreeNow(lldb::addr_t allocation);
-
   /// ObjectFileJITDelegate overrides
   lldb::ByteOrder GetByteOrder() const override;
 
