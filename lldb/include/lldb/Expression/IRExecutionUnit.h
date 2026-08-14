@@ -486,8 +486,11 @@ private:
   lldb::addr_t m_interpreter_stack_bottom;
   lldb::addr_t m_interpreter_stack_top;
 
-  bool m_strip_underscore = true; ///< True for platforms where global symbols
-                                  ///  have a _ prefix
+  /// True for platforms where global symbols have a _ prefix. Derived from the
+  /// module's data layout, so it is valid from construction onwards -- symbol
+  /// lookups happen before the module is JITted, and on interpreted
+  /// expressions they happen without it being JITted at all.
+  bool m_strip_underscore;
   bool m_reported_allocations; ///< True after allocations have been reported.
                                ///It is possible that
   ///< sections will be allocated when this is true, in which case they weren't
