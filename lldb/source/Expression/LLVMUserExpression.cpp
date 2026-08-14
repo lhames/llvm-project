@@ -11,9 +11,7 @@
 #include "lldb/Expression/DiagnosticManager.h"
 #include "lldb/Expression/ExpressionVariable.h"
 #include "lldb/Expression/IRExecutionUnit.h"
-#include "lldb/Expression/IRInterpreter.h"
 #include "lldb/Expression/Materializer.h"
-#include "lldb/Host/HostInfo.h"
 #include "lldb/Symbol/Block.h"
 #include "lldb/Symbol/Function.h"
 #include "lldb/Symbol/ObjectFile.h"
@@ -25,14 +23,10 @@
 #include "lldb/Target/Process.h"
 #include "lldb/Target/StackFrame.h"
 #include "lldb/Target/Target.h"
-#include "lldb/Target/ThreadPlan.h"
-#include "lldb/Target/ThreadPlanCallUserExpression.h"
 #include "lldb/Utility/ConstString.h"
 #include "lldb/Utility/ErrorMessages.h"
 #include "lldb/Utility/LLDBLog.h"
 #include "lldb/Utility/Log.h"
-#include "lldb/Utility/Policy.h"
-#include "lldb/Utility/StreamString.h"
 #include "lldb/ValueObject/ValueObjectConstResult.h"
 
 using namespace lldb;
@@ -99,13 +93,9 @@ LLVMUserExpression::DoExecute(DiagnosticManager &diagnostic_manager,
   lldb::addr_t function_stack_bottom = LLDB_INVALID_ADDRESS;
   lldb::addr_t function_stack_top = LLDB_INVALID_ADDRESS;
 
-  lldb::ExpressionResults execution_result =
-      CanInterpret()
-          ? RunInterpreted(args, exe_ctx, options, diagnostic_manager,
-                           function_stack_bottom, function_stack_top)
-          : RunUsingThreadPlan(args, exe_ctx, options, diagnostic_manager,
-                               shared_ptr_to_me, function_stack_bottom,
-                               function_stack_top);
+  lldb::ExpressionResults execution_result = m_execution_unit_sp->Run(
+      args, exe_ctx, options, diagnostic_manager, shared_ptr_to_me,
+      function_stack_bottom, function_stack_top);
 
   if (execution_result != lldb::eExpressionCompleted)
     return execution_result;
@@ -115,169 +105,6 @@ LLVMUserExpression::DoExecute(DiagnosticManager &diagnostic_manager,
     return lldb::eExpressionCompleted;
 
   return lldb::eExpressionResultUnavailable;
-}
-
-lldb::ExpressionResults LLVMUserExpression::RunInterpreted(
-    llvm::ArrayRef<lldb::addr_t> args, ExecutionContext &exe_ctx,
-    const EvaluateExpressionOptions &options,
-    DiagnosticManager &diagnostic_manager, lldb::addr_t &function_stack_bottom,
-    lldb::addr_t &function_stack_top) {
-  llvm::Module *module = m_execution_unit_sp->GetModule();
-  llvm::Function *function = m_execution_unit_sp->GetFunction();
-
-  if (!module || !function) {
-    diagnostic_manager.PutString(
-        lldb::eSeverityError, "supposed to interpret, but nothing is there");
-    return lldb::eExpressionSetupError;
-  }
-
-  Status interpreter_error;
-
-  function_stack_bottom = m_execution_unit_sp->GetInterpreterStackBottom();
-  function_stack_top = m_execution_unit_sp->GetInterpreterStackTop();
-
-  IRInterpreter::Interpret(*module, *function, args, *m_execution_unit_sp,
-                           interpreter_error, function_stack_bottom,
-                           function_stack_top, exe_ctx, options.GetTimeout());
-
-  if (!interpreter_error.Success()) {
-    diagnostic_manager.Printf(lldb::eSeverityError,
-                              "supposed to interpret, but failed: %s",
-                              interpreter_error.AsCString());
-    return lldb::eExpressionDiscarded;
-  }
-
-  return lldb::eExpressionCompleted;
-}
-
-lldb::ExpressionResults LLVMUserExpression::RunUsingThreadPlan(
-    llvm::ArrayRef<lldb::addr_t> args, ExecutionContext &exe_ctx,
-    const EvaluateExpressionOptions &options,
-    DiagnosticManager &diagnostic_manager,
-    lldb::UserExpressionSP &shared_ptr_to_me,
-    lldb::addr_t &function_stack_bottom, lldb::addr_t &function_stack_top) {
-  // The expression log is quite verbose, and if you're just tracking the
-  // execution of the expression, it's quite convenient to have these logs come
-  // out with the STEP log as well.
-  Log *log(GetLog(LLDBLog::Expressions | LLDBLog::Step));
-
-  if (!exe_ctx.HasThreadScope()) {
-    diagnostic_manager.Printf(lldb::eSeverityError,
-                              "%s called with no thread selected",
-                              __FUNCTION__);
-    return lldb::eExpressionSetupError;
-  }
-
-  // Store away the thread ID for error reporting, in case it exits
-  // during execution:
-  lldb::tid_t expr_thread_id = exe_ctx.GetThreadRef().GetID();
-
-  Address wrapper_address(m_jit_start_addr);
-
-  lldb::ThreadPlanSP call_plan_sp(new ThreadPlanCallUserExpression(
-      exe_ctx.GetThreadRef(), wrapper_address, args, options,
-      shared_ptr_to_me));
-
-  StreamString ss;
-  if (!call_plan_sp || !call_plan_sp->ValidatePlan(&ss)) {
-    diagnostic_manager.PutString(lldb::eSeverityError, ss.GetString());
-    return lldb::eExpressionSetupError;
-  }
-
-  ThreadPlanCallUserExpression *user_expression_plan =
-      static_cast<ThreadPlanCallUserExpression *>(call_plan_sp.get());
-
-  lldb::addr_t function_stack_pointer =
-      user_expression_plan->GetFunctionStackPointer();
-
-  function_stack_bottom = function_stack_pointer - HostInfo::GetPageSize();
-  function_stack_top = function_stack_pointer;
-
-  LLDB_LOGF(log,
-            "-- [UserExpression::Execute] Execution of expression begins --");
-
-  if (exe_ctx.GetProcessPtr())
-    exe_ctx.GetProcessPtr()->SetRunningUserExpression(true);
-
-  PolicyStack::Guard expr_policy_guard =
-      PolicyStack::Get().PushPublicStateRunningExpression();
-
-  lldb::ExpressionResults execution_result =
-      exe_ctx.GetProcessRef().RunThreadPlan(exe_ctx, call_plan_sp, options,
-                                            diagnostic_manager);
-
-  if (exe_ctx.GetProcessPtr())
-    exe_ctx.GetProcessPtr()->SetRunningUserExpression(false);
-
-  LLDB_LOGF(log, "-- [UserExpression::Execute] Execution of expression "
-                 "completed --");
-
-  if (execution_result == lldb::eExpressionInterrupted ||
-      execution_result == lldb::eExpressionHitBreakpoint) {
-    const char *error_desc = nullptr;
-    const char *explanation = execution_result == lldb::eExpressionInterrupted
-                                  ? "was interrupted"
-                                  : "hit a breakpoint";
-
-    if (user_expression_plan) {
-      if (auto real_stop_info_sp = user_expression_plan->GetRealStopInfo())
-        error_desc = real_stop_info_sp->GetDescription();
-    }
-
-    if (error_desc)
-      diagnostic_manager.Printf(lldb::eSeverityError,
-                                "Expression execution %s: %s.", explanation,
-                                error_desc);
-    else
-      diagnostic_manager.Printf(lldb::eSeverityError,
-                                "Expression execution %s.", explanation);
-
-    if ((execution_result == lldb::eExpressionInterrupted &&
-         options.DoesUnwindOnError()) ||
-        (execution_result == lldb::eExpressionHitBreakpoint &&
-         options.DoesIgnoreBreakpoints()))
-      diagnostic_manager.AppendMessageToDiagnostic(
-          "The process has been returned to the state before expression "
-          "evaluation.");
-    else {
-      if (execution_result == lldb::eExpressionHitBreakpoint)
-        user_expression_plan->TransferExpressionOwnership();
-      diagnostic_manager.AppendMessageToDiagnostic(
-          "The process has been left at the point where it was "
-          "interrupted, use \"thread return -x\" to return to the state "
-          "before expression evaluation.");
-    }
-
-    return execution_result;
-  }
-
-  if (execution_result == lldb::eExpressionStoppedForDebug) {
-    diagnostic_manager.PutString(
-        lldb::eSeverityInfo,
-        "Expression execution was halted at the first instruction of the "
-        "expression function because \"debug\" was requested.\n"
-        "Use \"thread return -x\" to return to the state before expression "
-        "evaluation.");
-    return execution_result;
-  }
-
-  if (execution_result == lldb::eExpressionThreadVanished) {
-    diagnostic_manager.Printf(lldb::eSeverityError,
-                              "Couldn't execute expression: the thread on "
-                              "which the expression was being run (0x%" PRIx64
-                              ") exited during its execution.",
-                              expr_thread_id);
-    return execution_result;
-  }
-
-  if (execution_result != lldb::eExpressionCompleted) {
-    diagnostic_manager.Printf(lldb::eSeverityError,
-                              "Couldn't execute expression: result was %s",
-                              toString(execution_result).c_str());
-    return execution_result;
-  }
-
-  return lldb::eExpressionCompleted;
 }
 
 bool LLVMUserExpression::FinalizeJITExecution(

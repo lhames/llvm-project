@@ -89,6 +89,53 @@ public:
   /// if it will be evaluated by running JITted code in the target.
   bool WillInterpret() const { return m_will_interpret; }
 
+  /// Run the expression, by interpreting its IR or by running its JITted code
+  /// in the target, whichever this unit was prepared for.
+  ///
+  /// \param[in] args
+  ///     The already-built argument list for the expression's wrapper
+  ///     function, including the address of the materialized struct.
+  ///
+  /// \param[in] expression_sp
+  ///     Keeps the expression alive for as long as the thread plan that runs
+  ///     it, and receives the plan's callbacks. Unused when interpreting.
+  ///
+  /// \param[out] function_stack_bottom
+  /// \param[out] function_stack_top
+  ///     The bounds of the stack that the expression's frame occupied, which
+  ///     the caller needs in order to dematerialize its results.
+  ///
+  /// \return
+  ///     eExpressionCompleted on success.
+  //
+  // TODO: Revisit the interaction between materialization, running and
+  // dematerialization, and discuss with the community before going further.
+  //
+  // Two things are unresolved here. First, the stack bounds reported above are
+  // internal state for the interpreted case but are derived at run time from
+  // the thread plan's stack pointer for the JITted one. Second, and the reason
+  // expression_sp has to be passed at all, there are two paths that finalize
+  // an expression: normally LLVMUserExpression::DoExecute dematerializes once
+  // Run returns, but when the expression hits a user breakpoint and is left
+  // running in the target, DoExecute returns early and the thread plan takes
+  // over -- see TransferExpressionOwnership below, and
+  // ThreadPlanCallUserExpression::MischiefManaged, which calls
+  // FinalizeJITExecution on the expression and stashes the result variable so
+  // it can still be reported later.
+  //
+  // For the thread plan to hold only an execution unit, both dematerialization
+  // and the production of that result variable would have to move here. The
+  // latter is language-specific -- UserExpression::GetResultAfterDematerializa-
+  // tion is virtual -- so it likely needs a narrower callback interface rather
+  // than a straight move.
+  lldb::ExpressionResults Run(llvm::ArrayRef<lldb::addr_t> args,
+                              ExecutionContext &exe_ctx,
+                              const EvaluateExpressionOptions &options,
+                              DiagnosticManager &diagnostic_manager,
+                              lldb::UserExpressionSP &expression_sp,
+                              lldb::addr_t &function_stack_bottom,
+                              lldb::addr_t &function_stack_top);
+
   /// Allocate the interpreter's private, host-only scratch stack, if one
   /// hasn't already been allocated. Idempotent.
   bool AllocateInterpreterStackFrame(DiagnosticManager &diagnostic_manager,
@@ -196,6 +243,23 @@ public:
   }
 
 private:
+  /// Run the expression by interpreting its IR directly.
+  lldb::ExpressionResults
+  RunInterpreted(llvm::ArrayRef<lldb::addr_t> args, ExecutionContext &exe_ctx,
+                 const EvaluateExpressionOptions &options,
+                 DiagnosticManager &diagnostic_manager,
+                 lldb::addr_t &function_stack_bottom,
+                 lldb::addr_t &function_stack_top);
+
+  /// Run the expression by executing its JIT-compiled code in the target
+  /// process via a ThreadPlan.
+  lldb::ExpressionResults RunUsingThreadPlan(
+      llvm::ArrayRef<lldb::addr_t> args, ExecutionContext &exe_ctx,
+      const EvaluateExpressionOptions &options,
+      DiagnosticManager &diagnostic_manager,
+      lldb::UserExpressionSP &expression_sp,
+      lldb::addr_t &function_stack_bottom, lldb::addr_t &function_stack_top);
+
   /// Look up the object in m_address_map that contains a given address, find
   /// where it was copied to, and return the remote address at the same offset
   /// into the copied entity
