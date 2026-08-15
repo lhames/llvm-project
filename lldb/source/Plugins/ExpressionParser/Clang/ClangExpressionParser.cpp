@@ -1580,7 +1580,8 @@ lldb_private::Status ClangExpressionParser::DoPrepareForExecution(
   if (decl_map) {
     StreamString error_stream;
     IRForTarget ir_for_target(
-        decl_map, m_expr.NeedsVariableResolution(), *execution_unit_sp,
+        decl_map, m_expr.NeedsVariableResolution(),
+        execution_unit_sp->GetSymbolResolver(), exe_ctx.GetTargetSP(),
         error_stream, execution_policy, function_name.AsCString(nullptr));
 
     if (!ir_for_target.runOnModule(*execution_unit_sp->GetModule())) {

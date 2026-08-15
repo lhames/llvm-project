@@ -43,7 +43,7 @@ class NamedDecl;
 
 namespace lldb_private {
 class ClangExpressionDeclMap;
-class IRExecutionUnit;
+class ExpressionSymbolResolver;
 class IRMemoryMap;
 }
 
@@ -83,8 +83,8 @@ public:
   /// \param[in] func_name
   ///     The name of the function to prepare for execution in the target.
   IRForTarget(lldb_private::ClangExpressionDeclMap *decl_map, bool resolve_vars,
-              lldb_private::IRExecutionUnit &execution_unit,
-              lldb_private::Stream &error_stream,
+              lldb_private::ExpressionSymbolResolver &symbol_resolver,
+              lldb::TargetSP target_sp, lldb_private::Stream &error_stream,
               lldb_private::ExecutionPolicy execution_policy,
               const char *func_name = "$__lldb_expr");
 
@@ -347,8 +347,10 @@ private:
   llvm::IntegerType *m_intptr_ty = nullptr;
   /// The stream on which errors should be printed.
   lldb_private::Stream &m_error_stream;
-  /// The execution unit containing the IR being created.
-  lldb_private::IRExecutionUnit &m_execution_unit;
+  /// Resolves the names the IR being created refers to.
+  lldb_private::ExpressionSymbolResolver &m_symbol_resolver;
+  /// The target the IR is being created for.
+  lldb::TargetSP m_target_sp;
   /// True if the function's result in the AST is a pointer (see comments in
   /// ASTResultSynthesizer::SynthesizeBodyResult)
   bool m_result_is_pointer = false;

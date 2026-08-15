@@ -71,15 +71,15 @@ static llvm::Value *FindEntryInstruction(llvm::Function *function) {
   return &*function->getEntryBlock().getFirstNonPHIOrDbg();
 }
 
-IRForTarget::IRForTarget(lldb_private::ClangExpressionDeclMap *decl_map,
-                         bool resolve_vars,
-                         lldb_private::IRExecutionUnit &execution_unit,
-                         lldb_private::Stream &error_stream,
-                         lldb_private::ExecutionPolicy execution_policy,
-                         const char *func_name)
+IRForTarget::IRForTarget(
+    lldb_private::ClangExpressionDeclMap *decl_map, bool resolve_vars,
+    lldb_private::ExpressionSymbolResolver &symbol_resolver,
+    lldb::TargetSP target_sp, lldb_private::Stream &error_stream,
+    lldb_private::ExecutionPolicy execution_policy, const char *func_name)
     : m_resolve_vars(resolve_vars), m_func_name(func_name),
       m_decl_map(decl_map), m_error_stream(error_stream),
-      m_execution_unit(execution_unit), m_policy(execution_policy),
+      m_symbol_resolver(symbol_resolver), m_target_sp(std::move(target_sp)),
+      m_policy(execution_policy),
       m_entry_instruction_finder(FindEntryInstruction) {}
 
 /* Handy utility functions used at several places in the code */
@@ -302,7 +302,7 @@ bool IRForTarget::CreateResultVariable(llvm::Function &llvm_function) {
         m_decl_map->GetTypeSystem()->GetType(result_var->getType()));
   }
 
-  lldb::TargetSP target_sp(m_execution_unit.GetTarget());
+  lldb::TargetSP target_sp(m_target_sp);
   auto bit_size_or_err = m_result_type.GetBitSize(target_sp.get());
   if (!bit_size_or_err) {
     lldb_private::StreamString type_desc_stream;
@@ -420,7 +420,7 @@ bool IRForTarget::RewriteObjCConstString(llvm::GlobalVariable *ns_str,
         "CFStringCreateWithBytes");
 
     bool missing_weak = false;
-    CFStringCreateWithBytes_addr = m_execution_unit.FindSymbol(
+    CFStringCreateWithBytes_addr = m_symbol_resolver.FindSymbol(
         g_CFStringCreateWithBytes_str, missing_weak);
     if (CFStringCreateWithBytes_addr == LLDB_INVALID_ADDRESS || missing_weak) {
       LLDB_LOG(log, "Couldn't find CFStringCreateWithBytes in the target");
@@ -802,8 +802,8 @@ bool IRForTarget::RewriteObjCSelector(Instruction *selector_load) {
 
     bool missing_weak = false;
     static lldb_private::ConstString g_sel_registerName_str("sel_registerName");
-    sel_registerName_addr = m_execution_unit.FindSymbol(g_sel_registerName_str,
-                                                        missing_weak);
+    sel_registerName_addr =
+        m_symbol_resolver.FindSymbol(g_sel_registerName_str, missing_weak);
     if (sel_registerName_addr == LLDB_INVALID_ADDRESS || missing_weak)
       return false;
 
@@ -1049,7 +1049,7 @@ bool IRForTarget::MaybeHandleVariable(Value *llvm_value_ptr) {
       value_type = global_variable->getType();
     }
 
-    auto *target = m_execution_unit.GetTarget().get();
+    auto *target = m_target_sp.get();
     std::optional<uint64_t> value_size =
         llvm::expectedToOptional(compiler_type.GetByteSize(target));
     if (!value_size)
