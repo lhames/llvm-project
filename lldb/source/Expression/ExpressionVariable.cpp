@@ -116,38 +116,13 @@ lldb::addr_t PersistentExpressionState::LookupSymbol(ConstString name) {
 
 void PersistentExpressionState::RegisterExecutionUnit(
     lldb::IRExecutionUnitSP &execution_unit_sp) {
-  Log *log = GetLog(LLDBLog::Expressions);
-
+  // Publishing a symbol and keeping its execution unit alive are one
+  // operation: the address is only valid for as long as the unit that emitted
+  // the code lives, and m_execution_units is what keeps it living.
   m_execution_units.insert(execution_unit_sp);
 
-  LLDB_LOGF(log, "Registering JITted Functions:\n");
-
-  for (const IRExecutionUnit::JittedFunction &jitted_function :
-       execution_unit_sp->GetJittedFunctions()) {
-    if (jitted_function.m_external &&
-        jitted_function.m_name != execution_unit_sp->GetFunctionName() &&
-        jitted_function.m_remote_addr != LLDB_INVALID_ADDRESS) {
-      m_symbol_map[jitted_function.m_name.GetCString()] =
-          jitted_function.m_remote_addr;
-      LLDB_LOGF(log, "  Function: %s at 0x%" PRIx64 ".",
-                jitted_function.m_name.GetCString(),
-                jitted_function.m_remote_addr);
-    }
-  }
-
-  LLDB_LOGF(log, "Registering JIIted Symbols:\n");
-
-  for (const IRExecutionUnit::JittedGlobalVariable &global_var :
-       execution_unit_sp->GetJittedGlobalVariables()) {
-    if (global_var.m_remote_addr != LLDB_INVALID_ADDRESS) {
-      // Demangle the name before inserting it, so that lookups by the ConstStr
-      // of the demangled name will find the mangled one (needed for looking up
-      // metadata pointers.)
-      Mangled mangler(global_var.m_name);
-      mangler.GetDemangledName();
-      m_symbol_map[global_var.m_name.GetCString()] = global_var.m_remote_addr;
-      LLDB_LOGF(log, "  Symbol: %s at 0x%" PRIx64 ".",
-                global_var.m_name.GetCString(), global_var.m_remote_addr);
-    }
-  }
+  execution_unit_sp->GetExportedSymbols(
+      [this](ConstString name, lldb::addr_t addr) {
+        m_symbol_map[name.GetCString()] = addr;
+      });
 }

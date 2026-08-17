@@ -716,11 +716,10 @@ bool ClangUserExpression::Parse(DiagnosticManager &diagnostic_manager,
       register_execution_unit = true;
     }
 
-    // If there is more than one external function in the execution unit, it
-    // needs to keep living even if it's not top level, because the result
-    // could refer to that function.
+    // The unit also has to keep living if an expression result could refer to
+    // code it emitted, even when this isn't a top-level expression.
 
-    if (m_execution_unit_sp->GetJittedFunctions().size() > 1) {
+    if (m_execution_unit_sp->NeedsToOutliveExpression()) {
       register_execution_unit = true;
     }
 

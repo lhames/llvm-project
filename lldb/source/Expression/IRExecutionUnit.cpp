@@ -785,6 +785,38 @@ uint8_t *IRExecutionUnit::MemoryManager::allocateDataSection(
   return return_value;
 }
 
+void IRExecutionUnit::GetExportedSymbols(
+    llvm::function_ref<void(ConstString, lldb::addr_t)> callback) {
+  Log *log = GetLog(LLDBLog::Expressions);
+
+  LLDB_LOGF(log, "Registering JITted Functions:\n");
+
+  for (const JittedFunction &jitted_function : m_jitted_functions) {
+    if (jitted_function.m_external && jitted_function.m_name != m_name &&
+        jitted_function.m_remote_addr != LLDB_INVALID_ADDRESS) {
+      callback(jitted_function.m_name, jitted_function.m_remote_addr);
+      LLDB_LOGF(log, "  Function: %s at 0x%" PRIx64 ".",
+                jitted_function.m_name.GetCString(),
+                jitted_function.m_remote_addr);
+    }
+  }
+
+  LLDB_LOGF(log, "Registering JIIted Symbols:\n");
+
+  for (const JittedGlobalVariable &global_var : m_jitted_global_variables) {
+    if (global_var.m_remote_addr != LLDB_INVALID_ADDRESS) {
+      // Demangle the name before inserting it, so that lookups by the ConstStr
+      // of the demangled name will find the mangled one (needed for looking up
+      // metadata pointers.)
+      Mangled mangler(global_var.m_name);
+      mangler.GetDemangledName();
+      callback(global_var.m_name, global_var.m_remote_addr);
+      LLDB_LOGF(log, "  Symbol: %s at 0x%" PRIx64 ".",
+                global_var.m_name.GetCString(), global_var.m_remote_addr);
+    }
+  }
+}
+
 void IRExecutionUnit::GetStaticInitializers(
     std::vector<lldb::addr_t> &static_initializers) {
   Log *log = GetLog(LLDBLog::Expressions);

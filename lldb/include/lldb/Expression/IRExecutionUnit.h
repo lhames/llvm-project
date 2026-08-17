@@ -14,6 +14,7 @@
 #include <string>
 #include <vector>
 
+#include "llvm/ADT/STLFunctionalExtras.h"
 #include "llvm/ExecutionEngine/SectionMemoryManager.h"
 #include "llvm/IR/Module.h"
 
@@ -221,13 +222,18 @@ public:
         : JittedEntity(name, local_addr, remote_addr) {}
   };
 
-  const std::vector<JittedFunction> &GetJittedFunctions() {
-    return m_jitted_functions;
+  /// True if this unit has to outlive the expression that created it, because
+  /// an expression result may hold an address that points into the code it
+  /// emitted. Note that this includes functions with local linkage, which are
+  /// never exported by name and so never reported by GetExportedSymbols.
+  bool NeedsToOutliveExpression() const {
+    return m_jitted_functions.size() > 1;
   }
 
-  const std::vector<JittedGlobalVariable> &GetJittedGlobalVariables() {
-    return m_jitted_global_variables;
-  }
+  /// Report the symbols this unit exported into the target, and the addresses
+  /// they ended up at, to \p callback.
+  void GetExportedSymbols(
+      llvm::function_ref<void(ConstString, lldb::addr_t)> callback);
 
   void AppendPreferredSymbolContexts(SymbolContextList const &contexts) {
     m_symbol_resolver.AppendPreferredModules(contexts);
