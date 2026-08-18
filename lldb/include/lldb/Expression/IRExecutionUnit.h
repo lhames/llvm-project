@@ -82,15 +82,17 @@ public:
   void GetRunnableInfo(Status &error, lldb::addr_t &func_addr,
                        lldb::addr_t &func_end);
 
-  /// Record how this expression is going to be evaluated. Set by the
-  /// expression parser once it knows whether the IR can be interpreted.
-  void SetWillInterpret(bool will_interpret) {
-    m_will_interpret = will_interpret;
-  }
-
   /// True if this expression will be evaluated by interpreting its IR, false
   /// if it will be evaluated by running JITted code in the target.
-  bool WillInterpret() const { return m_will_interpret; }
+  virtual bool WillInterpret() const = 0;
+
+  /// Do whatever this unit needs before it can Run. Called once the
+  /// expression's arguments have been allocated but before they are
+  /// materialized.
+  virtual bool PrepareToRun(DiagnosticManager &diagnostic_manager,
+                            Target &target, Process *process) {
+    return true;
+  }
 
   /// Run the expression, by interpreting its IR or by running its JITted code
   /// in the target, whichever this unit was prepared for.
@@ -131,30 +133,13 @@ public:
   // latter is language-specific -- UserExpression::GetResultAfterDematerializa-
   // tion is virtual -- so it likely needs a narrower callback interface rather
   // than a straight move.
-  lldb::ExpressionResults Run(llvm::ArrayRef<lldb::addr_t> args,
-                              ExecutionContext &exe_ctx,
-                              const EvaluateExpressionOptions &options,
-                              DiagnosticManager &diagnostic_manager,
-                              lldb::UserExpressionSP &expression_sp,
-                              lldb::addr_t &function_stack_bottom,
-                              lldb::addr_t &function_stack_top);
-
-  /// Allocate the interpreter's private, host-only scratch stack, if one
-  /// hasn't already been allocated. Idempotent.
-  bool AllocateInterpreterStackFrame(DiagnosticManager &diagnostic_manager,
-                                     Target &target, Process *process);
-
-  /// The bottom of the interpreter's scratch stack, or LLDB_INVALID_ADDRESS if
-  /// it hasn't been allocated.
-  lldb::addr_t GetInterpreterStackBottom() const {
-    return m_interpreter_stack_bottom;
-  }
-
-  /// The top of the interpreter's scratch stack, or LLDB_INVALID_ADDRESS if it
-  /// hasn't been allocated.
-  lldb::addr_t GetInterpreterStackTop() const {
-    return m_interpreter_stack_top;
-  }
+  virtual lldb::ExpressionResults Run(llvm::ArrayRef<lldb::addr_t> args,
+                                      ExecutionContext &exe_ctx,
+                                      const EvaluateExpressionOptions &options,
+                                      DiagnosticManager &diagnostic_manager,
+                                      lldb::UserExpressionSP &expression_sp,
+                                      lldb::addr_t &function_stack_bottom,
+                                      lldb::addr_t &function_stack_top) = 0;
 
   /// ObjectFileJITDelegate overrides
   lldb::ByteOrder GetByteOrder() const override;
@@ -236,25 +221,7 @@ public:
   void GetExportedSymbols(
       llvm::function_ref<void(ConstString, lldb::addr_t)> callback);
 
-
-private:
-  /// Run the expression by interpreting its IR directly.
-  lldb::ExpressionResults
-  RunInterpreted(llvm::ArrayRef<lldb::addr_t> args, ExecutionContext &exe_ctx,
-                 const EvaluateExpressionOptions &options,
-                 DiagnosticManager &diagnostic_manager,
-                 lldb::addr_t &function_stack_bottom,
-                 lldb::addr_t &function_stack_top);
-
-  /// Run the expression by executing its JIT-compiled code in the target
-  /// process via a ThreadPlan.
-  lldb::ExpressionResults RunUsingThreadPlan(
-      llvm::ArrayRef<lldb::addr_t> args, ExecutionContext &exe_ctx,
-      const EvaluateExpressionOptions &options,
-      DiagnosticManager &diagnostic_manager,
-      lldb::UserExpressionSP &expression_sp,
-      lldb::addr_t &function_stack_bottom, lldb::addr_t &function_stack_top);
-
+protected:
   /// Look up the object in m_address_map that contains a given address, find
   /// where it was copied to, and return the remote address at the same offset
   /// into the copied entity
@@ -460,17 +427,10 @@ private:
 
   std::atomic<bool> m_did_jit;
 
-  /// True if this expression is evaluated by interpreting its IR rather than
-  /// by running JITted code in the target.
-  bool m_will_interpret;
 
   lldb::addr_t m_function_load_addr;
   lldb::addr_t m_function_end_load_addr;
 
-  /// The interpreter's private, host-only scratch stack. Only allocated when
-  /// the expression is interpreted rather than JITted.
-  lldb::addr_t m_interpreter_stack_bottom;
-  lldb::addr_t m_interpreter_stack_top;
 
   bool m_reported_allocations; ///< True after allocations have been reported.
                                ///It is possible that

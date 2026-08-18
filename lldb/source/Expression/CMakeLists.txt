@@ -8,9 +8,11 @@ add_lldb_library(lldbExpression NO_PLUGIN_DEPENDENCIES
   ExpressionVariable.cpp
   ExpressionSymbolResolver.cpp
   FunctionCaller.cpp
+  InterpretedExecutionUnit.cpp
   IRExecutionUnit.cpp
   IRInterpreter.cpp
   IRMemoryMap.cpp
+  JITExecutionUnit.cpp
   LLVMUserExpression.cpp
   Materializer.cpp
   ObjectFileJIT.cpp

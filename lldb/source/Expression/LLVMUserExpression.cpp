@@ -169,9 +169,8 @@ bool LLVMUserExpression::PrepareToExecuteJITExpression(
     if (!AllocateArgumentStruct(diagnostic_manager, struct_address))
       return false;
 
-    if (CanInterpret() &&
-        !m_execution_unit_sp->AllocateInterpreterStackFrame(
-            diagnostic_manager, *target, process.get()))
+    if (!m_execution_unit_sp->PrepareToRun(diagnostic_manager, *target,
+                                           process.get()))
       return false;
 
     Status materialize_error;

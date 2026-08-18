@@ -77,6 +77,8 @@
 #include "lldb/Core/Module.h"
 #include "lldb/Expression/DiagnosticManager.h"
 #include "lldb/Expression/IRExecutionUnit.h"
+#include "lldb/Expression/InterpretedExecutionUnit.h"
+#include "lldb/Expression/JITExecutionUnit.h"
 #include "lldb/Expression/IRInterpreter.h"
 #include "lldb/Host/File.h"
 #include "lldb/Host/HostInfo.h"
@@ -1671,16 +1673,21 @@ lldb_private::Status ClangExpressionParser::DoPrepareForExecution(
         }
       }
     }
-
   }
 
-  execution_unit_sp = std::make_shared<IRExecutionUnit>(
-      m_llvm_context, // handed off here
-      llvm_module_up, // handed off here
-      function_name, exe_ctx.GetTargetSP(), std::move(symbol_resolver),
-      m_compiler->getTargetOpts().Features);
-
-  execution_unit_sp->SetWillInterpret(can_interpret);
+  // The mechanism is now known, so it selects the type of the execution unit.
+  if (can_interpret)
+    execution_unit_sp = std::make_shared<InterpretedExecutionUnit>(
+        m_llvm_context, // handed off here
+        llvm_module_up, // handed off here
+        function_name, exe_ctx.GetTargetSP(), std::move(symbol_resolver),
+        m_compiler->getTargetOpts().Features);
+  else
+    execution_unit_sp = std::make_shared<JITExecutionUnit>(
+        m_llvm_context, // handed off here
+        llvm_module_up, // handed off here
+        function_name, exe_ctx.GetTargetSP(), std::move(symbol_resolver),
+        m_compiler->getTargetOpts().Features);
 
   if (!can_interpret)
     execution_unit_sp->GetRunnableInfo(err, func_addr, func_end);
