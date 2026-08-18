@@ -1504,6 +1504,7 @@ lldb_private::Status ClangExpressionParser::DoPrepareForExecution(
     bool &can_interpret, ExecutionPolicy execution_policy) {
   func_addr = LLDB_INVALID_ADDRESS;
   func_end = LLDB_INVALID_ADDRESS;
+  can_interpret = false;
   Log *log = GetLog(LLDBLog::Expressions);
 
   lldb_private::Status err;
@@ -1562,14 +1563,15 @@ lldb_private::Status ClangExpressionParser::DoPrepareForExecution(
     custom_passes.EarlyPasses->run(*llvm_module_up);
   }
 
-  execution_unit_sp = std::make_shared<IRExecutionUnit>(
-      m_llvm_context, // handed off here
-      llvm_module_up, // handed off here
-      function_name, exe_ctx.GetTargetSP(), sc,
-      m_compiler->getTargetOpts().Features);
+  // Symbol resolution needs only the symbol context and the module's
+  // global-symbol prefix, so it can be set up before the execution unit
+  // exists. IRForTarget resolves symbols while rewriting the IR, which has to
+  // happen before we can tell whether the result is interpretable.
+  ExpressionSymbolResolver symbol_resolver(
+      sc, llvm_module_up->getDataLayout().getGlobalPrefix() == '_');
 
   if (auto *options = m_expr.GetOptions())
-    execution_unit_sp->AppendPreferredSymbolContexts(
+    symbol_resolver.AppendPreferredModules(
         options->GetPreferredSymbolContexts());
 
   ClangExpressionHelper *type_system_helper =
@@ -1579,12 +1581,12 @@ lldb_private::Status ClangExpressionParser::DoPrepareForExecution(
 
   if (decl_map) {
     StreamString error_stream;
-    IRForTarget ir_for_target(
-        decl_map, m_expr.NeedsVariableResolution(),
-        execution_unit_sp->GetSymbolResolver(), exe_ctx.GetTargetSP(),
-        error_stream, execution_policy, function_name.AsCString(nullptr));
+    IRForTarget ir_for_target(decl_map, m_expr.NeedsVariableResolution(),
+                              symbol_resolver, exe_ctx.GetTargetSP(),
+                              error_stream, execution_policy,
+                              function_name.AsCString(nullptr));
 
-    if (!ir_for_target.runOnModule(*execution_unit_sp->GetModule())) {
+    if (!ir_for_target.runOnModule(*llvm_module_up)) {
       err = Status(error_stream.GetString().str());
       return err;
     }
@@ -1597,8 +1599,13 @@ lldb_private::Status ClangExpressionParser::DoPrepareForExecution(
 
       bool interpret_function_calls =
           !process ? false : process->CanInterpretFunctionCalls();
+      // Look the function up by function_name, the possibly-mangled name that
+      // FindFunctionInModule matched above and that the execution unit will
+      // use. m_expr.FunctionName() is the unmangled name and need not be
+      // present in the module.
       can_interpret = IRInterpreter::CanInterpret(
-          *execution_unit_sp->GetModule(), *execution_unit_sp->GetFunction(),
+          *llvm_module_up,
+          *llvm_module_up->getFunction(function_name.GetStringRef()),
           interpret_error, interpret_function_calls);
 
       if (!can_interpret && execution_policy == eExecutionPolicyNever) {
@@ -1646,7 +1653,7 @@ lldb_private::Status ClangExpressionParser::DoPrepareForExecution(
           IRDynamicChecks ir_dynamic_checks(*checker_funcs,
                                             function_name.AsCString(nullptr));
 
-          llvm::Module *module = execution_unit_sp->GetModule();
+          llvm::Module *module = llvm_module_up.get();
           if (!module || !ir_dynamic_checks.runOnModule(*module)) {
             err = Status::FromErrorString(
                 "Couldn't add dynamic checks to the expression");
@@ -1665,19 +1672,18 @@ lldb_private::Status ClangExpressionParser::DoPrepareForExecution(
       }
     }
 
-    if (execution_policy == eExecutionPolicyAlways ||
-        execution_policy == eExecutionPolicyTopLevel || !can_interpret) {
-      execution_unit_sp->GetRunnableInfo(err, func_addr, func_end);
-    }
-  } else {
-    execution_unit_sp->GetRunnableInfo(err, func_addr, func_end);
   }
 
-  // Record how the expression is going to be evaluated, so that clients can
-  // ask the execution unit rather than tracking it themselves. Note that
-  // can_interpret keeps its incoming value on the paths above that never
-  // consult IRInterpreter::CanInterpret.
+  execution_unit_sp = std::make_shared<IRExecutionUnit>(
+      m_llvm_context, // handed off here
+      llvm_module_up, // handed off here
+      function_name, exe_ctx.GetTargetSP(), std::move(symbol_resolver),
+      m_compiler->getTargetOpts().Features);
+
   execution_unit_sp->SetWillInterpret(can_interpret);
+
+  if (!can_interpret)
+    execution_unit_sp->GetRunnableInfo(err, func_addr, func_end);
 
   return err;
 }

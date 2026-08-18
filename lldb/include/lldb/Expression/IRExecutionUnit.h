@@ -63,7 +63,8 @@ public:
   /// Constructor
   IRExecutionUnit(std::unique_ptr<llvm::LLVMContext> &context_up,
                   std::unique_ptr<llvm::Module> &module_up, ConstString &name,
-                  const lldb::TargetSP &target_sp, const SymbolContext &sym_ctx,
+                  const lldb::TargetSP &target_sp,
+                  ExpressionSymbolResolver symbol_resolver,
                   std::vector<std::string> &cpu_features);
 
   /// Destructor
@@ -235,14 +236,6 @@ public:
   void GetExportedSymbols(
       llvm::function_ref<void(ConstString, lldb::addr_t)> callback);
 
-  void AppendPreferredSymbolContexts(SymbolContextList const &contexts) {
-    m_symbol_resolver.AppendPreferredModules(contexts);
-  }
-
-  /// The resolver used to turn the symbol names in this unit's IR into load
-  /// addresses. Handed to IRForTarget, which resolves symbols while rewriting
-  /// the IR, before it is known whether the expression will be JITted.
-  ExpressionSymbolResolver &GetSymbolResolver() { return m_symbol_resolver; }
 
 private:
   /// Run the expression by interpreting its IR directly.
@@ -462,7 +455,6 @@ private:
                                                                ///JITted into
                                                                ///machine code
   const ConstString m_name;
-  SymbolContext m_sym_ctx; ///< Used for symbol lookups
   ExpressionSymbolResolver m_symbol_resolver;
   std::vector<ConstString> m_failed_lookups;
 
