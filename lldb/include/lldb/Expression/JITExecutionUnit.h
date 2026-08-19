@@ -45,10 +45,24 @@ public:
 
   ~JITExecutionUnit() override;
 
-  /// Compile the module and copy the result into the target. Idempotent: the
-  /// addresses are recorded on the first call and returned thereafter.
-  void GetRunnableInfo(Status &error, lldb::addr_t &func_addr,
-                       lldb::addr_t &func_end);
+  /// Compile \p module_up and copy the result into the target.
+  ///
+  /// The module is consumed here: the ExecutionEngine takes ownership of it, so
+  /// a JITExecutionUnit that exists has already been compiled and has valid
+  /// addresses. Compilation can fail, which is why this is a factory rather
+  /// than a constructor.
+  static llvm::Expected<std::shared_ptr<JITExecutionUnit>>
+  Create(std::unique_ptr<llvm::LLVMContext> &context_up,
+         std::unique_ptr<llvm::Module> &module_up, ConstString &name,
+         const lldb::TargetSP &target_sp,
+         ExpressionSymbolResolver symbol_resolver,
+         std::vector<std::string> &cpu_features);
+
+  /// The bounds of the expression's wrapper function in the target.
+  lldb::addr_t GetFunctionLoadAddress() const { return m_function_load_addr; }
+  lldb::addr_t GetFunctionEndLoadAddress() const {
+    return m_function_end_load_addr;
+  }
 
   bool WillInterpret() const override { return false; }
 
@@ -134,6 +148,9 @@ public:
   };
 
 private:
+  /// Does the compiling. Only called from Create.
+  void JITCompile(Status &error);
+
   /// Look up the object in m_address_map that contains a given address, find
   /// where it was copied to, and return the remote address at the same offset
   /// into the copied entity
@@ -330,8 +347,6 @@ private:
                                  /// JITted into
                                  /// machine code
   std::vector<ConstString> m_failed_lookups;
-
-  std::atomic<bool> m_did_jit{false};
 
   lldb::addr_t m_function_load_addr = LLDB_INVALID_ADDRESS;
   lldb::addr_t m_function_end_load_addr = LLDB_INVALID_ADDRESS;

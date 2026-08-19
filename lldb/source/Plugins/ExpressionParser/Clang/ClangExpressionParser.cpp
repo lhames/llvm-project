@@ -1683,13 +1683,17 @@ lldb_private::Status ClangExpressionParser::DoPrepareForExecution(
         function_name, exe_ctx.GetTargetSP(), std::move(symbol_resolver),
         m_compiler->getTargetOpts().Features);
   } else {
-    auto jit_unit_sp = std::make_shared<JITExecutionUnit>(
+    auto jit_unit_or_err = JITExecutionUnit::Create(
         m_llvm_context, // handed off here
         llvm_module_up, // handed off here
         function_name, exe_ctx.GetTargetSP(), std::move(symbol_resolver),
         m_compiler->getTargetOpts().Features);
-    jit_unit_sp->GetRunnableInfo(err, func_addr, func_end);
-    execution_unit_sp = std::move(jit_unit_sp);
+    if (!jit_unit_or_err)
+      return Status::FromError(jit_unit_or_err.takeError());
+
+    func_addr = (*jit_unit_or_err)->GetFunctionLoadAddress();
+    func_end = (*jit_unit_or_err)->GetFunctionEndLoadAddress();
+    execution_unit_sp = std::move(*jit_unit_or_err);
   }
 
   return err;

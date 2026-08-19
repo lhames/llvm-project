@@ -310,14 +310,26 @@ void JITExecutionUnit::ReportSymbolLookupError(ConstString name) {
   m_failed_lookups.push_back(name);
 }
 
-void JITExecutionUnit::GetRunnableInfo(Status &error, lldb::addr_t &func_addr,
-                                       lldb::addr_t &func_end) {
+llvm::Expected<std::shared_ptr<JITExecutionUnit>>
+JITExecutionUnit::Create(std::unique_ptr<llvm::LLVMContext> &context_up,
+                         std::unique_ptr<llvm::Module> &module_up,
+                         ConstString &name, const lldb::TargetSP &target_sp,
+                         ExpressionSymbolResolver symbol_resolver,
+                         std::vector<std::string> &cpu_features) {
+  auto unit_sp = std::make_shared<JITExecutionUnit>(
+      context_up, module_up, name, target_sp, std::move(symbol_resolver),
+      cpu_features);
+
+  Status error;
+  unit_sp->JITCompile(error);
+  if (error.Fail())
+    return error.ToError();
+
+  return unit_sp;
+}
+
+void JITExecutionUnit::JITCompile(Status &error) {
   lldb::ProcessSP process_sp(GetProcessWP().lock());
-
-  static std::recursive_mutex s_runnable_info_mutex;
-
-  func_addr = LLDB_INVALID_ADDRESS;
-  func_end = LLDB_INVALID_ADDRESS;
 
   if (!process_sp) {
     error =
@@ -325,17 +337,6 @@ void JITExecutionUnit::GetRunnableInfo(Status &error, lldb::addr_t &func_addr,
                                 "process because the process is invalid");
     return;
   }
-
-  if (m_did_jit) {
-    func_addr = m_function_load_addr;
-    func_end = m_function_end_load_addr;
-
-    return;
-  };
-
-  std::lock_guard<std::recursive_mutex> guard(s_runnable_info_mutex);
-
-  m_did_jit = true;
 
   Log *log = GetLog(LLDBLog::Expressions);
 
@@ -577,9 +578,6 @@ void JITExecutionUnit::GetRunnableInfo(Status &error, lldb::addr_t &func_addr,
       }
     }
   }
-
-  func_addr = m_function_load_addr;
-  func_end = m_function_end_load_addr;
 }
 
 JITExecutionUnit::MemoryManager::MemoryManager(JITExecutionUnit &parent)
