@@ -359,16 +359,7 @@ UserExpression::Evaluate(ExecutionContext &exe_ctx,
   if (parse_success) {
     lldb::ExpressionVariableSP expr_result;
 
-    if (execution_policy == eExecutionPolicyNever &&
-        !user_expression_sp->CanInterpret()) {
-      LLDB_LOG(log, "== [UserExpression::Evaluate] Expression may not run, but "
-                    "is not constant ==");
-
-      if (diagnostic_manager.Diagnostics().empty())
-        error = Status::FromError(llvm::make_error<ExpressionError>(
-            lldb::eExpressionSetupError,
-            "expression needed to run but couldn't"));
-    } else if (execution_policy == eExecutionPolicyTopLevel) {
+    if (execution_policy == eExecutionPolicyTopLevel) {
       set_error(Status(UserExpression::kNoResult, lldb::eErrorTypeGeneric));
       return lldb::eExpressionCompleted;
     } else {

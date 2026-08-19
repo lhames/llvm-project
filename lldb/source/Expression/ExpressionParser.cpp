@@ -23,6 +23,16 @@ Status ExpressionParser::PrepareForExecution(
   Status status =
       DoPrepareForExecution(func_addr, func_end, execution_unit_sp, exe_ctx,
                             can_interpret, execution_policy);
+
+  // The caller asked for an expression that never runs in the target, so an
+  // expression we can't interpret can't be evaluated at all. Checked here
+  // rather than in each DoPrepareForExecution so that it holds for every
+  // parser.
+  if (status.Success() && execution_policy == eExecutionPolicyNever &&
+      !can_interpret)
+    return Status::FromErrorString(
+        "expression needed to run in the target, but the target can't be run");
+
   if (status.Success() && exe_ctx.GetProcessPtr() && exe_ctx.HasThreadScope())
     status = RunStaticInitializers(execution_unit_sp, exe_ctx);
 

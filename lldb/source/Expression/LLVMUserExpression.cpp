@@ -45,7 +45,7 @@ LLVMUserExpression::LLVMUserExpression(ExecutionContextScope &exe_scope,
       m_execution_unit_sp(), m_materializer_up(), m_jit_module_wp(),
       m_target(nullptr), m_materialized_address(LLDB_INVALID_ADDRESS) {}
 
-bool LLVMUserExpression::CanInterpret() {
+bool LLVMUserExpression::WillInterpret() const {
   return m_execution_unit_sp && m_execution_unit_sp->WillInterpret();
 }
 
@@ -63,7 +63,7 @@ LLVMUserExpression::DoExecute(DiagnosticManager &diagnostic_manager,
                               const EvaluateExpressionOptions &options,
                               lldb::UserExpressionSP &shared_ptr_to_me,
                               lldb::ExpressionVariableSP &result_sp) {
-  if (m_jit_start_addr == LLDB_INVALID_ADDRESS && !CanInterpret()) {
+  if (m_jit_start_addr == LLDB_INVALID_ADDRESS && !WillInterpret()) {
     diagnostic_manager.PutString(
         lldb::eSeverityError,
         "Expression can't be run, because there is no JIT compiled function");
@@ -165,7 +165,7 @@ bool LLVMUserExpression::PrepareToExecuteJITExpression(
     return false;
   }
 
-  if (m_jit_start_addr != LLDB_INVALID_ADDRESS || CanInterpret()) {
+  if (m_jit_start_addr != LLDB_INVALID_ADDRESS || WillInterpret()) {
     if (!AllocateArgumentStruct(diagnostic_manager, struct_address))
       return false;
 
@@ -192,7 +192,7 @@ bool LLVMUserExpression::AllocateArgumentStruct(
     DiagnosticManager &diagnostic_manager, lldb::addr_t &struct_address) {
   if (m_materialized_address == LLDB_INVALID_ADDRESS) {
     IRMemoryMap::AllocationPolicy policy =
-        CanInterpret() ? IRMemoryMap::eAllocationPolicyHostOnly
+        WillInterpret() ? IRMemoryMap::eAllocationPolicyHostOnly
                         : IRMemoryMap::eAllocationPolicyMirror;
 
     const bool zero_memory = false;

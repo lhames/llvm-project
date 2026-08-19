@@ -113,7 +113,6 @@ public:
     return false;
   }
 
-  virtual bool CanInterpret() = 0;
 
   bool MatchesContext(ExecutionContext &exe_ctx);
 

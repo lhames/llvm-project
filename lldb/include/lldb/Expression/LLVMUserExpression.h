@@ -64,11 +64,6 @@ public:
       lldb::addr_t function_stack_bottom = LLDB_INVALID_ADDRESS,
       lldb::addr_t function_stack_top = LLDB_INVALID_ADDRESS) override;
 
-  /// True if this expression will be evaluated by interpreting its IR rather
-  /// than by running JITted code in the target. Answered by the execution
-  /// unit, which records the decision when the expression is prepared.
-  bool CanInterpret() override;
-
   Materializer *GetMaterializer() override { return m_materializer_up.get(); }
 
   /// Return the string that the parser should parse.  Must be a full
@@ -81,6 +76,11 @@ protected:
             const EvaluateExpressionOptions &options,
             lldb::UserExpressionSP &shared_ptr_to_me,
             lldb::ExpressionVariableSP &result) override;
+
+  /// True if this expression will be evaluated by interpreting its IR rather
+  /// than by running JITted code in the target. Answered by the execution
+  /// unit, whose type records which mechanism was chosen.
+  bool WillInterpret() const;
 
   bool PrepareToExecuteJITExpression(DiagnosticManager &diagnostic_manager,
                                      ExecutionContext &exe_ctx,
