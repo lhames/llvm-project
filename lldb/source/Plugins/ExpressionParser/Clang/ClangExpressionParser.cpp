@@ -1676,21 +1676,21 @@ lldb_private::Status ClangExpressionParser::DoPrepareForExecution(
   }
 
   // The mechanism is now known, so it selects the type of the execution unit.
-  if (can_interpret)
+  if (can_interpret) {
     execution_unit_sp = std::make_shared<InterpretedExecutionUnit>(
         m_llvm_context, // handed off here
         llvm_module_up, // handed off here
         function_name, exe_ctx.GetTargetSP(), std::move(symbol_resolver),
         m_compiler->getTargetOpts().Features);
-  else
-    execution_unit_sp = std::make_shared<JITExecutionUnit>(
+  } else {
+    auto jit_unit_sp = std::make_shared<JITExecutionUnit>(
         m_llvm_context, // handed off here
         llvm_module_up, // handed off here
         function_name, exe_ctx.GetTargetSP(), std::move(symbol_resolver),
         m_compiler->getTargetOpts().Features);
-
-  if (!can_interpret)
-    execution_unit_sp->GetRunnableInfo(err, func_addr, func_end);
+    jit_unit_sp->GetRunnableInfo(err, func_addr, func_end);
+    execution_unit_sp = std::move(jit_unit_sp);
+  }
 
   return err;
 }
