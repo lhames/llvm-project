@@ -69,10 +69,6 @@ public:
 
   virtual EvaluateExpressionOptions *GetOptions() { return nullptr; };
 
-  /// Return the address of the function's JIT-compiled code, or
-  /// LLDB_INVALID_ADDRESS if the function is not JIT compiled
-  lldb::addr_t StartAddress() { return m_jit_start_addr; }
-
   /// Called to notify the expression that it is about to be executed.
   virtual void WillStartExecuting() {}
 
@@ -89,12 +85,6 @@ protected:
   lldb::ProcessWP m_jit_process_wp; /// An expression might have a process, but
                                     /// it doesn't need to (e.g. calculator
                                     /// mode.)
-  lldb::addr_t m_jit_start_addr; ///< The address of the JITted function within
-                                 ///the JIT allocation.  LLDB_INVALID_ADDRESS if
-                                 ///invalid.
-  lldb::addr_t m_jit_end_addr;   ///< The address of the JITted function within
-                                 ///the JIT allocation.  LLDB_INVALID_ADDRESS if
-                                 ///invalid.
 };
 
 /// Holds parsed information about a function call label that

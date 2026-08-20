@@ -294,6 +294,10 @@ protected:
                 ///< This will get made in CompileFunction, so it is
                 ///< safe to access it after that.
 
+  /// The bounds of this expression's JIT-compiled code in the target, or
+  /// LLDB_INVALID_ADDRESS if it was not JIT compiled.
+  lldb::addr_t m_jit_start_addr = LLDB_INVALID_ADDRESS;
+  lldb::addr_t m_jit_end_addr = LLDB_INVALID_ADDRESS;
   lldb::ModuleWP m_jit_module_wp;
   std::string
       m_name; ///< The name of this clang function - for debugging purposes.

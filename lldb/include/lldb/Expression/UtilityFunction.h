@@ -74,6 +74,10 @@ public:
   /// \return
   ///     True if the address falls within the function's bounds;
   ///     false if not (or the function is not JIT compiled)
+  /// Return the address of the function's JIT-compiled code, or
+  /// LLDB_INVALID_ADDRESS if the function is not JIT compiled.
+  lldb::addr_t StartAddress() { return m_jit_start_addr; }
+
   bool ContainsAddress(lldb::addr_t address) {
     // nothing is both >= LLDB_INVALID_ADDRESS and < LLDB_INVALID_ADDRESS, so
     // this always returns false if the function is not JIT compiled yet
@@ -112,6 +116,10 @@ public:
 
 protected:
   std::shared_ptr<IRExecutionUnit> m_execution_unit_sp;
+  /// The bounds of this expression's JIT-compiled code in the target, or
+  /// LLDB_INVALID_ADDRESS if it was not JIT compiled.
+  lldb::addr_t m_jit_start_addr = LLDB_INVALID_ADDRESS;
+  lldb::addr_t m_jit_end_addr = LLDB_INVALID_ADDRESS;
   lldb::ModuleWP m_jit_module_wp;
   /// The text of the function.  Must be a well-formed translation unit.
   std::string m_function_text;

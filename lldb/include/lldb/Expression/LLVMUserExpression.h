@@ -101,6 +101,11 @@ protected:
   std::unique_ptr<Materializer> m_materializer_up; ///< The materializer to use
                                                    /// when running the
                                                    /// expression.
+  /// The bounds of this expression's JIT-compiled code in the target, or
+  /// LLDB_INVALID_ADDRESS if it was not JIT compiled.
+  lldb::addr_t m_jit_start_addr = LLDB_INVALID_ADDRESS;
+  lldb::addr_t m_jit_end_addr = LLDB_INVALID_ADDRESS;
+
   lldb::ModuleWP m_jit_module_wp;
   Target *m_target; ///< The target for storing persistent data like types and
                     ///variables.
