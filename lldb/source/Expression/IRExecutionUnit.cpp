@@ -68,8 +68,3 @@ IRExecutionUnit::~IRExecutionUnit() {
   m_module_up.reset();
   m_context_up.reset();
 }
-
-lldb::addr_t IRExecutionUnit::FindSymbol(lldb_private::ConstString name,
-                                         bool &missing_weak) {
-  return m_symbol_resolver.FindSymbol(name, missing_weak);
-}

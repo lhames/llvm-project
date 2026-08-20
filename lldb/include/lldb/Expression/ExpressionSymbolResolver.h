@@ -23,18 +23,23 @@ namespace lldb_private {
 
 /// \class ExpressionSymbolResolver ExpressionSymbolResolver.h
 /// "lldb/Expression/ExpressionSymbolResolver.h" Resolves the symbols an
-/// expression's IR refers to, to load addresses in the target.
+/// expression refers to but does not define, to load addresses in the target.
 ///
-/// Expression IR refers to functions and variables in the target by name.
-/// Before that IR can be interpreted or JITted, each of those names has to be
-/// turned into a load address. That is not a simple lookup: the name may be an
-/// LLDB function call label, it may need alternate manglings tried, and it may
-/// be satisfied by a language runtime or by a symbol that a previous
-/// expression defined.
+/// Expression IR refers to functions and variables by name. Before that IR can
+/// be interpreted or JITted, each of those names has to be turned into a load
+/// address. That is not a simple lookup: the name may be an LLDB function call
+/// label, it may need alternate manglings tried, and it may be satisfied by a
+/// language runtime rather than by a module's symbol table.
 ///
-/// This class encapsulates that policy. It is independent of whether the
-/// expression will ultimately be interpreted or JITted -- IRForTarget resolves
-/// symbols while rewriting the IR, before either has been decided.
+/// Names can also be satisfied by symbols that *earlier* expressions defined
+/// and published, which is how one expression calls a function another one
+/// declared. Those are reached through the target's persistent symbols.
+///
+/// This class encapsulates that policy. It is independent of how the
+/// expression will be evaluated -- IRForTarget resolves symbols while
+/// rewriting the IR, before either mechanism has been chosen, and interpreted
+/// IR needs addresses just as JITted code does.
+
 class ExpressionSymbolResolver {
 public:
   /// Constructor

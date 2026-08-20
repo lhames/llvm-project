@@ -789,7 +789,8 @@ uint64_t JITExecutionUnit::MemoryManager::GetSymbolAddressAndPresence(
 
   ConstString name_cs(Name);
 
-  lldb::addr_t ret = m_parent.FindSymbol(name_cs, missing_weak);
+  lldb::addr_t ret =
+      m_parent.GetExternalSymbolResolver().FindSymbol(name_cs, missing_weak);
 
   if (ret == LLDB_INVALID_ADDRESS) {
     LLDB_LOGF(log,

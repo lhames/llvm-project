@@ -264,7 +264,9 @@ public:
             llvm::GlobalValue::dropLLVMManglingEscape(
                 constant_func->getName()));
         bool missing_weak = false;
-        lldb::addr_t addr = m_execution_unit.FindSymbol(name, missing_weak);
+        lldb::addr_t addr =
+            m_execution_unit.GetExternalSymbolResolver().FindSymbol(
+                name, missing_weak);
         if (addr == LLDB_INVALID_ADDRESS)
           return false;
         // A resolved symbol address may be wider than a target pointer when we

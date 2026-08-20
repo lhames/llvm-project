@@ -126,8 +126,16 @@ public:
                                       lldb::addr_t &function_stack_bottom,
                                       lldb::addr_t &function_stack_top) = 0;
 
-  /// Find the load address of \p name in the target.
-  lldb::addr_t FindSymbol(ConstString name, bool &missing_weak);
+  /// The resolver for symbols this expression refers to but does not define.
+  ///
+  /// Both mechanisms need this. Interpreted IR can name a function just as
+  /// JITted code can, and either way the name has to become a real address in
+  /// the target before the expression can use it. Contrast GetExportedSymbols,
+  /// which is about the symbols an expression leaves behind, and which only a
+  /// unit that wrote code into the target can have.
+  ExpressionSymbolResolver &GetExternalSymbolResolver() {
+    return m_symbol_resolver;
+  }
 
   /// True if this unit has to outlive the expression that created it, because
   /// an expression result may hold an address that points into code it emitted.
