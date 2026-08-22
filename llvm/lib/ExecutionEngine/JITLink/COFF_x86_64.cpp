@@ -27,14 +27,6 @@ using namespace llvm::jitlink;
 
 namespace {
 
-enum EdgeKind_coff_x86_64 : Edge::Kind {
-  PCRel32 = x86_64::FirstPlatformRelocation,
-  Pointer32NB,
-  Pointer64,
-  SectionIdx16,
-  SecRel32,
-};
-
 class COFFJITLinker_x86_64 : public JITLinker<COFFJITLinker_x86_64> {
   friend class JITLinker<COFFJITLinker_x86_64>;
 
@@ -100,52 +92,52 @@ private:
     case COFF::RelocationTypeAMD64::IMAGE_REL_AMD64_ADDR32NB: {
       if (!ImageBase)
         ImageBase = &addImageBaseSymbol();
-      Kind = EdgeKind_coff_x86_64::Pointer32NB;
+      Kind = x86_64::Pointer32NB;
       Addend = *reinterpret_cast<const support::little32_t *>(FixupPtr);
       break;
     }
     case COFF::RelocationTypeAMD64::IMAGE_REL_AMD64_REL32: {
-      Kind = EdgeKind_coff_x86_64::PCRel32;
+      Kind = x86_64::PCRel32;
       Addend = *reinterpret_cast<const support::little32_t *>(FixupPtr);
       break;
     }
     case COFF::RelocationTypeAMD64::IMAGE_REL_AMD64_REL32_1: {
-      Kind = EdgeKind_coff_x86_64::PCRel32;
+      Kind = x86_64::PCRel32;
       Addend = *reinterpret_cast<const support::little32_t *>(FixupPtr);
       Addend -= 1;
       break;
     }
     case COFF::RelocationTypeAMD64::IMAGE_REL_AMD64_REL32_2: {
-      Kind = EdgeKind_coff_x86_64::PCRel32;
+      Kind = x86_64::PCRel32;
       Addend = *reinterpret_cast<const support::little32_t *>(FixupPtr);
       Addend -= 2;
       break;
     }
     case COFF::RelocationTypeAMD64::IMAGE_REL_AMD64_REL32_3: {
-      Kind = EdgeKind_coff_x86_64::PCRel32;
+      Kind = x86_64::PCRel32;
       Addend = *reinterpret_cast<const support::little32_t *>(FixupPtr);
       Addend -= 3;
       break;
     }
     case COFF::RelocationTypeAMD64::IMAGE_REL_AMD64_REL32_4: {
-      Kind = EdgeKind_coff_x86_64::PCRel32;
+      Kind = x86_64::PCRel32;
       Addend = *reinterpret_cast<const support::little32_t *>(FixupPtr);
       Addend -= 4;
       break;
     }
     case COFF::RelocationTypeAMD64::IMAGE_REL_AMD64_REL32_5: {
-      Kind = EdgeKind_coff_x86_64::PCRel32;
+      Kind = x86_64::PCRel32;
       Addend = *reinterpret_cast<const support::little32_t *>(FixupPtr);
       Addend -= 5;
       break;
     }
     case COFF::RelocationTypeAMD64::IMAGE_REL_AMD64_ADDR64: {
-      Kind = EdgeKind_coff_x86_64::Pointer64;
+      Kind = x86_64::Pointer64;
       Addend = *reinterpret_cast<const support::little64_t *>(FixupPtr);
       break;
     }
     case COFF::RelocationTypeAMD64::IMAGE_REL_AMD64_SECTION: {
-      Kind = EdgeKind_coff_x86_64::SectionIdx16;
+      Kind = x86_64::Pointer16;
       Addend = *reinterpret_cast<const support::little16_t *>(FixupPtr);
       uint64_t SectionIdx = 0;
       if (COFFSymbol.isAbsolute())
@@ -163,7 +155,7 @@ private:
       // FIXME: SECREL to external symbol should be handled
       if (!GraphSymbol->isDefined())
         return Error::success();
-      Kind = EdgeKind_coff_x86_64::SecRel32;
+      Kind = x86_64::SecRel32;
       Addend = *reinterpret_cast<const support::little32_t *>(FixupPtr);
       break;
     }
@@ -201,26 +193,14 @@ public:
     for (auto *B : G.blocks()) {
       for (auto &E : B->edges()) {
         switch (E.getKind()) {
-        case EdgeKind_coff_x86_64::Pointer32NB: {
+        case x86_64::Pointer32NB: {
           auto ImageBase = GetImageBase(G);
           assert(ImageBase && "__ImageBase symbol must be defined");
           E.setAddend(E.getAddend() - ImageBase->getAddress().getValue());
           E.setKind(x86_64::Pointer32);
           break;
         }
-        case EdgeKind_coff_x86_64::PCRel32: {
-          E.setKind(x86_64::PCRel32);
-          break;
-        }
-        case EdgeKind_coff_x86_64::Pointer64: {
-          E.setKind(x86_64::Pointer64);
-          break;
-        }
-        case EdgeKind_coff_x86_64::SectionIdx16: {
-          E.setKind(x86_64::Pointer16);
-          break;
-        }
-        case EdgeKind_coff_x86_64::SecRel32: {
+        case x86_64::SecRel32: {
           E.setAddend(E.getAddend() -
                       getSectionStart(E.getTarget().getSection()).getValue());
           E.setKind(x86_64::Pointer32);
@@ -247,27 +227,187 @@ private:
   GetImageBaseSymbol GetImageBase;
   DenseMap<Section *, orc::ExecutorAddr> SectionStartCache;
 };
+
+// A LinkGraph pass that resolves __ImageBase for COFF x86_64 graphs
+class COFFImageBaseResolution_x86_64 {
+public:
+  // Resolves __ImageBase to the lowest allocated section address in G
+  Error operator()(LinkGraph &G) {
+    GetImageBaseSymbol GetImageBase;
+
+    auto ImageBase = GetImageBase(G);
+    if (ImageBase) {
+      orc::ExecutorAddr Base(~uint64_t(0));
+      for (auto &Sec : G.sections()) {
+        if (Sec.empty())
+          continue;
+        SectionRange SR(Sec);
+        Base = std::min(Base, SR.getStart());
+      }
+      assert(ImageBase && "__ImageBase symbol must be defined");
+      ImageBase->getAddressable().setAddress(Base);
+    }
+    return Error::success();
+  }
+};
+
+// Creates executable stubs for Pointer32NB edges targeting external
+// symbols whose image relative offset from __ImageBase would exceed
+// 32 bits.
+class COFFPointer32NBStubsManager : public llvm::jitlink::TableManager<COFFPointer32NBStubsManager> {
+public:
+  // Returns section name for ADDR32NB stubs in the link graph.
+  static StringRef getSectionName() { return "$__STUBS_ADDR32NB"; }
+
+  // Constructs a stub manager using GOT for indirect jump targets.
+  COFFPointer32NBStubsManager(LinkGraph &, x86_64::GOTTableManager &GOT) : GOT(GOT) {
+  }
+
+  // Checks edge E on block B in graph G. If E is a Pointer32NB
+  // targeting an external, redirects it to a nearby stub. Returns
+  // true if handled.
+  bool visitEdge(LinkGraph &G, Block *B, Edge &E) {
+    if (E.getKind() == x86_64::Pointer32NB && !E.getTarget().isDefined()) {
+      DEBUG_WITH_TYPE("jitlink", {
+        dbgs() << "  Fixing " << G.getEdgeKindName(E.getKind()) << " edge at "
+               << B->getFixupAddress(E) << " (" << B->getAddress() << " + "
+               << formatv("{0:x}", E.getOffset()) << ")\n";
+      });
+
+      E.setTarget(getEntryForTarget(G, E.getTarget()));
+      return true;
+    }
+    return false;
+  }
+
+  // Creates an executable stub in G that jumps to Target via a GOT
+  // entry.  Returns an anonymous symbol pointing to the stub.
+  Symbol &createEntry(LinkGraph &G, Symbol &Target) {
+    return x86_64::createAnonymousPointerJumpStub(G, getStubsSection(G),
+                                          GOT.getEntryForTarget(G, Target));
+  }
+
+public:
+  // Returns the executable stub section in G, creating it on first
+  // call.
+  Section &getStubsSection(LinkGraph &G) {
+    if (!StubsSection)
+      StubsSection = &G.createSection(getSectionName(),
+                                      orc::MemProt::Read | orc::MemProt::Exec);
+    return *StubsSection;
+  }
+
+  // Shared GOT for indirect jump targets.
+  x86_64::GOTTableManager &GOT;
+  // Lazily created stub section.
+  Section *StubsSection = nullptr;
+};
+
 } // namespace
 
 namespace llvm {
 namespace jitlink {
 
+// Create stubs in G for external references: PLT stubs for calls (PCRel32)
+// and ADDR32NB stubs for image-relative pointers (Pointer32NB). Always succeeds.
+Error buildTables_COFF_x86_64(LinkGraph &G) {
+  LLVM_DEBUG(dbgs() << "Visiting edges in graph:\n");
+
+  x86_64::GOTTableManager GOT(G);
+  x86_64::PLTTableManager PLT(G, GOT);
+  COFFPointer32NBStubsManager COFFPtr32NB(G, GOT);
+
+  // Mark calls to externals as BranchPCRel32 so PLTTableManager will create
+  // stubs for them. Without this, it ignores COFF's PCRel32 edge kind.
+  for (auto *B : G.blocks()) {
+    for (auto &E : B->edges()) {
+      if (E.getKind() == x86_64::PCRel32 &&
+          !E.getTarget().isDefined()) {
+        E.setKind(x86_64::BranchPCRel32);
+      }
+    }
+  }
+
+  visitExistingEdges(G, PLT, COFFPtr32NB);
+  return Error::success();
+}
+
+// Synthesize COFF __imp_ Import Address Table (IAT) entries.
+//
+// For a dllimport reference, codegen emits an indirect access through a named
+// __imp_X symbol, e.g.
+//
+//     callq *__imp_bar(%rip)        ; or, for data: movq __imp_g(%rip), %rax
+//
+// where __imp_X is an undefined external. This pass supplies the missing IAT
+// entry by defining __imp_X over an 8-byte pointer slot that holds X's address:
+//
+//     __imp_bar:
+//         .quad bar                 ; X is resolved as an ordinary external
+//
+// X is left external, so its address is provided by whatever resolves the
+// JITDylib's externals (an import library, a DynamicLibrarySearchGenerator,
+// AutoImportGenerator, ...). If X is unresolvable the link fails, exactly as a
+// static link against the corresponding import library would.
+//
+// This is the COFF analog of the ELF/Mach-O GOT builder, but deliberately NOT
+// written as a TableManager/visitEdge pass like x86_64::GOTTableManager. ELF's
+// GOT references are *nameless* edge kinds, so that builder has to create an
+// anonymous entry and redirect every edge to it (and, for our case, would then
+// have to delete the now-orphaned __imp_X external so it isn't looked up).
+// COFF instead references a *named* __imp_X symbol, so the simpler and more
+// natural thing is to define that symbol over the slot: edges to __imp_X then
+// resolve to it with no edge rewriting and no orphan cleanup, call and
+// data-access references are handled identically, and sharing is automatic
+// because there is exactly one __imp_X symbol per import.
+//
+// Direct (non-dllimport) references such as `callq foo` are intentionally not
+// handled here: those are either kept in range by the slab allocator or thunked
+// by the opt-in AutoImportGenerator -- both outside this pass.
+Error synthesizeIATEntries_COFF_x86_64(LinkGraph &G) {
+  static constexpr StringRef ImpPrefix = "__imp_";
+
+  // Collect the external __imp_ symbols up front: we mutate the symbol lists
+  // below (makeDefined / addExternalSymbol).
+  SmallVector<Symbol *, 8> Imps;
+  for (auto *Sym : G.external_symbols())
+    if (Sym->hasName() && (*Sym->getName()).starts_with(ImpPrefix))
+      Imps.push_back(Sym);
+  if (Imps.empty())
+    return Error::success();
+
+  auto FindByName = [&](const orc::SymbolStringPtr &Name) -> Symbol * {
+    if (auto *Sym = G.findExternalSymbolByName(Name))
+      return Sym;
+    if (auto *Sym = G.findDefinedSymbolByName(Name))
+      return Sym;
+    return nullptr;
+  };
+
+  Section &IATSec = G.createSection(COFFIATSectionName, orc::MemProt::Read);
+
+  for (auto *Imp : Imps) {
+    orc::SymbolStringPtr Base =
+        G.intern((*Imp->getName()).drop_front(ImpPrefix.size()));
+
+    // Find the real target X, or add it as an external to be resolved normally.
+    Symbol *Target = FindByName(std::move(Base));
+    if (!Target)
+      Target = &G.addExternalSymbol(std::move(Base), 0,
+                                    /*IsWeaklyReferenced=*/false);
+
+    // 8-byte slot holding &X, with __imp_X defined over it.
+    Symbol &Slot = x86_64::createAnonymousPointer(G, IATSec, Target);
+    G.makeDefined(*Imp, Slot.getBlock(), 0, G.getPointerSize(), Linkage::Strong,
+                  Scope::Local, /*IsLive=*/true);
+  }
+
+  return Error::success();
+}
+
 /// Return the string name of the given COFF x86_64 edge kind.
 const char *getCOFFX86RelocationKindName(Edge::Kind R) {
-  switch (R) {
-  case PCRel32:
-    return "PCRel32";
-  case Pointer32NB:
-    return "Pointer32NB";
-  case Pointer64:
-    return "Pointer64";
-  case SectionIdx16:
-    return "SectionIdx16";
-  case SecRel32:
-    return "SecRel32";
-  default:
-    return x86_64::getEdgeKindName(R);
-  }
+  return x86_64::getEdgeKindName(R);
 }
 
 Expected<std::unique_ptr<LinkGraph>> createLinkGraphFromCOFFObject_x86_64(
@@ -303,8 +443,22 @@ void link_COFF_x86_64(std::unique_ptr<LinkGraph> G,
     } else
       Config.PrePrunePasses.push_back(markAllSymbolsLive);
 
+    // Synthesize __imp_X IAT entries for dllimport references, like the GOT/PLT
+    // builders for ELF/Mach-O. Runs in PostPrune (before external-symbol
+    // lookup) so the X targets it introduces are resolved normally.
+    Config.PostPrunePasses.push_back(synthesizeIATEntries_COFF_x86_64);
+
+    // Add an in place GOT/PLT stub build pass for external calls.      
+    Config.PostPrunePasses.push_back(buildTables_COFF_x86_64);
+
+    // Resolve __ImageBase to the lowest allocated section address.
+    Config.PostAllocationPasses.push_back(COFFImageBaseResolution_x86_64());
+
     // Add COFF edge lowering passes.
     Config.PreFixupPasses.push_back(COFFLinkGraphLowering_x86_64());
+
+    // Add GOT/Stubs optimizer pass.
+    Config.PreFixupPasses.push_back(x86_64::optimizeGOTAndStubAccesses);
   }
 
   if (auto Err = Ctx->modifyPassConfig(*G, Config))

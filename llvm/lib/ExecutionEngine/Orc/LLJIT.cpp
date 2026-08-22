@@ -14,11 +14,13 @@
 #include "llvm/ExecutionEngine/Orc/EHFrameRegistrationPlugin.h"
 #include "llvm/ExecutionEngine/Orc/ELFNixPlatform.h"
 #include "llvm/ExecutionEngine/Orc/EPCDynamicLibrarySearchGenerator.h"
+#include "llvm/ExecutionEngine/Orc/ExecutionUtils.h"
 #include "llvm/ExecutionEngine/Orc/ExecutorProcessControl.h"
 #include "llvm/ExecutionEngine/Orc/MachOPlatform.h"
 #include "llvm/ExecutionEngine/Orc/ObjectLinkingLayer.h"
 #include "llvm/ExecutionEngine/Orc/ObjectTransformLayer.h"
 #include "llvm/ExecutionEngine/Orc/RTDyldObjectLinkingLayer.h"
+#include "llvm/ExecutionEngine/Orc/SEHFrameRegistrationPlugin.h"
 #include "llvm/ExecutionEngine/Orc/SelfExecutorProcessControl.h"
 #include "llvm/ExecutionEngine/Orc/TargetProcess/RegisterEHFrames.h"
 #include "llvm/ExecutionEngine/Orc/UnwindInfoRegistrationPlugin.h"
@@ -813,7 +815,7 @@ Error LLJITBuilderState::prepareForConstruction() {
       UseJITLink = TT.isOSBinFormatELF();
       break;
     case Triple::x86_64:
-      UseJITLink = !TT.isOSBinFormatCOFF();
+      UseJITLink = true;
       break;
     case Triple::ppc64:
       UseJITLink = TT.isPPC64ELFv2ABI();
@@ -828,10 +830,17 @@ Error LLJITBuilderState::prepareForConstruction() {
       if (!JTMB->getCodeModel())
         JTMB->setCodeModel(CodeModel::Small);
       JTMB->setRelocationModel(Reloc::PIC_);
-      CreateObjectLinkingLayer = [](ExecutionSession &ES,
+      bool IsOSBinFormatCOFF = TT.isOSBinFormatCOFF();
+      CreateObjectLinkingLayer = [IsOSBinFormatCOFF](ExecutionSession &ES,
                                     jitlink::JITLinkMemoryManager &MemMgr)
           -> Expected<std::unique_ptr<ObjectLayer>> {
-        return std::make_unique<ObjectLinkingLayer>(ES, MemMgr);
+        auto ObjectLayer = std::make_unique<ObjectLinkingLayer>(ES, MemMgr);
+        if (IsOSBinFormatCOFF) {
+          // COFF doesn't track symbol visibility, use IR flags as
+          // authoritative, matching RTDyld COFF behavior.
+          ObjectLayer->setOverrideObjectFlagsWithResponsibilityFlags(true);
+        }
+        return std::move(ObjectLayer);
       };
     }
   }
@@ -1269,6 +1278,13 @@ Expected<JITDylibSP> setUpGenericLLVMIRPlatform(LLJIT &J) {
         } else
           return UIRP.takeError();
       }
+    }
+
+    // Register .pdata with the Windows unwinder for SEH support.
+    if (J.getTargetTriple().isOSBinFormatCOFF()) {
+      OLL->addPlugin(std::make_shared<SEHFrameRegistrationPlugin>());
+      LLVM_DEBUG(dbgs() << "Enabled seh-frame support.\n");
+      UseEHFrames = false;
     }
 
     // Otherwise fall back to standard unwind registration.

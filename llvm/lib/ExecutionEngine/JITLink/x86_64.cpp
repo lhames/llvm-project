@@ -24,6 +24,8 @@ const char *getEdgeKindName(Edge::Kind K) {
     return "Pointer64";
   case Pointer32:
     return "Pointer32";
+  case Pointer32NB:
+    return "Pointer32NB";
   case Pointer32Signed:
     return "Pointer32Signed";
   case Pointer16:
@@ -74,6 +76,8 @@ const char *getEdgeKindName(Edge::Kind K) {
     return "PCRel32TLVPLoadREXRelaxable";
   case RequestTLVPAndTransformToPCRel32TLVPLoadREXRelaxable:
     return "RequestTLVPAndTransformToPCRel32TLVPLoadREXRelaxable";
+  case SecRel32:
+    return "SecRel32";
   default:
     return getGenericEdgeKindName(K);
   }

@@ -42,6 +42,16 @@ enum EdgeKind_x86_64 : Edge::Kind {
   ///
   Pointer32,
 
+  /// A 32-bit image-relative pointer value relocation.
+  ///
+  /// The value written is the target's offset from a base address (typically
+  /// the lowest allocated address in the link graph).
+  ///
+  /// Fixup expression:
+  ///   Fixup <- Target + Addend : uint32
+  ///
+  Pointer32NB,
+
   /// A signed 32-bit pointer value relocation
   ///
   /// Fixup expression:
@@ -427,6 +437,17 @@ enum EdgeKind_x86_64 : Edge::Kind {
   ///     phase will result in an assert/unreachable during the fixup phase.
   ///
   RequestTLVPAndTransformToPCRel32TLVPLoadREXRelaxable,
+
+  /// A 32-bit section-relative relocation.
+  ///
+  /// The value written is the target's offset from the start of its
+  /// containing section.
+  ///
+  /// Fixup expression:
+  ///   Fixup <- Target + Addend : uint32
+  ///
+  SecRel32,
+
   // First platform specific relocation.
   FirstPlatformRelocation
 };

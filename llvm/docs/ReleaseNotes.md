@@ -42,7 +42,8 @@ point (e.g. maybe you would like to give an example of the
 functionality, or simply have a lot to talk about), see the comment below
 for adding a new subsection. -->
 
-* ...
+* LLJIT now uses JITLink by default for x86_64 COFF targets (Windows).
+  This enables SEH exception handling in JIT'd code on Windows.
 
 <!-- If you would like to document a larger change, then you can add a
 subsection about it right here. You can copy the following boilerplate:

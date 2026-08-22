@@ -534,7 +534,16 @@ Expected<Symbol *> COFFLinkGraphBuilder::createDefinedSymbol(
       return make_error<JITLinkError>(
           "COMDAT export request already exists before symbol " +
           formatv("{0:d}", SymIndex));
-    return createCOMDATExportRequest(SymIndex, Symbol, Definition);
+
+    if (auto Err = createCOMDATExportRequest(SymIndex, Symbol, Definition).takeError())
+      return Err;
+
+    // Return a local symbol so relocations can resolve against this index.
+    // COMDAT sections without an export (e.g. .xdata$*) keep this symbol,
+    // while those with one will get it replaced in exportCOMDATSymbol.
+    return &G->addDefinedSymbol(
+        *B, Symbol.getValue(), SymbolName, 0, Linkage::Strong, Scope::Local,
+        Symbol.getComplexType() == COFF::IMAGE_SYM_DTYPE_FUNCTION, false);
   }
   return make_error<JITLinkError>("Unsupported storage class " +
                                   formatv("{0:d}", Symbol.getStorageClass()) +
@@ -550,9 +559,13 @@ Expected<Symbol *> COFFLinkGraphBuilder::createDefinedSymbol(
 // Second symbol is COMDAT symbol which usually defines the external name and
 // data type.
 //
-// Since two symbols always come in a specific order, we initiate pending COMDAT
+// Since two symbols usually come in a specific order, we initiate pending COMDAT
 // export request when we encounter the first symbol and actually exports it
-// when we process the second symbol.
+// when we process the second symbol. However, some COMDAT sections (e.g.
+// .xdata$*, .pdata$*) only have the section definition symbol with no
+// export following. The caller SHOULD register a local symbol for the first
+// symbol's index unconditionally so that relocations targeting it can
+// resolve regardless of whether an export symbol follows.
 //
 // Process the first symbol of COMDAT sequence.
 Expected<Symbol *> COFFLinkGraphBuilder::createCOMDATExportRequest(
@@ -604,6 +617,9 @@ Expected<Symbol *> COFFLinkGraphBuilder::createCOMDATExportRequest(
 }
 
 // Process the second symbol of COMDAT sequence.
+//
+// Replaces the local placeholder registered for the first symbol's
+// index.
 Expected<Symbol *>
 COFFLinkGraphBuilder::exportCOMDATSymbol(COFFSymbolIndex SymIndex,
                                          orc::SymbolStringPtr SymbolName,
@@ -623,6 +639,11 @@ COFFLinkGraphBuilder::exportCOMDATSymbol(COFFSymbolIndex SymIndex,
            << "\" in section " << Symbol.getSectionNumber() << "\n";
     dbgs() << "      " << *GSym << "\n";
   });
+
+  // Clear the first symbol's provisional placeholder so
+  // setGraphSymbol can replace it.
+  GraphSymbols[PendingComdatExport->SymbolIndex] = nullptr;
+
   setGraphSymbol(Symbol.getSectionNumber(), PendingComdatExport->SymbolIndex,
                  *GSym);
   DefinedSymbols[SymbolName] = GSym;

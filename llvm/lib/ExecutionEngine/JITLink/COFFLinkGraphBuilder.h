@@ -78,7 +78,7 @@ protected:
   }
 
   Symbol &addImageBaseSymbol(StringRef Name = "__ImageBase") {
-    auto &ImageBase = G->addExternalSymbol(G->intern(Name), 0, true);
+    auto &ImageBase = G->addAbsoluteSymbol(G->intern(Name), orc::ExecutorAddr(0), 0, Linkage::Strong, Scope::Local, true);
     ImageBase.setLive(true);
     return ImageBase;
   }

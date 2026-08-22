@@ -37,6 +37,7 @@
 #include "llvm/ExecutionEngine/Orc/MapperJITLinkMemoryManager.h"
 #include "llvm/ExecutionEngine/Orc/ObjectFileInterface.h"
 #include "llvm/ExecutionEngine/Orc/SectCreate.h"
+#include "llvm/ExecutionEngine/Orc/SEHFrameRegistrationPlugin.h"
 #include "llvm/ExecutionEngine/Orc/SelfExecutorProcessControl.h"
 #include "llvm/ExecutionEngine/Orc/Shared/OrcRTBridge.h"
 #include "llvm/ExecutionEngine/Orc/SimpleRemoteMemoryMapper.h"
@@ -78,8 +79,6 @@
 #include <sys/socket.h>
 #include <unistd.h>
 #endif // LLVM_ON_UNIX
-
-#include "WindowsEasyEHPlugin.h"
 
 #define DEBUG_TYPE "llvm_jitlink"
 
@@ -1271,8 +1270,6 @@ Session::Session(std::unique_ptr<ExecutorProcessControl> EPC, Error &Err)
     }
   }
 
-  ObjLayer->addPlugin(std::make_unique<WindowsEasyEHPlugin>());
-
   if (DebuggerSupport && TT.isOSBinFormatMachO()) {
     if (!ProcessSymsJD) {
       Err = make_error<StringError>("MachO debugging requires process symbols",
@@ -1375,6 +1372,9 @@ Session::Session(std::unique_ptr<ExecutorProcessControl> EPC, Error &Err)
         logAllUnhandledErrors(std::move(TargetSymErr), errs(),
                               "Debugger support not available: ");
     }
+  } else if (TT.isOSBinFormatCOFF()) {
+    if (!NoExec)
+      ObjLayer->addPlugin(std::make_unique<SEHFrameRegistrationPlugin>());
   }
 
   if (auto MainJDOrErr = ES.createJITDylib("main"))
