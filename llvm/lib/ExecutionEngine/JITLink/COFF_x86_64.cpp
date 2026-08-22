@@ -455,8 +455,8 @@ void link_COFF_x86_64(std::unique_ptr<LinkGraph> G,
     // Add an in place GOT/PLT stub build pass for external calls.      
     Config.PostPrunePasses.push_back(buildTables_COFF_x86_64);
 
-    // Add ImageBase resolution pass, needed by Lowering and other downstream passes.
-    Config.PreFixupPasses.push_back(COFFImageBaseResolution_x86_64());
+    // Resolve __ImageBase to the lowest allocated section address.
+    Config.PostAllocationPasses.push_back(COFFImageBaseResolution_x86_64());
 
     // Add COFF edge lowering passes.
     Config.PreFixupPasses.push_back(COFFLinkGraphLowering_x86_64());

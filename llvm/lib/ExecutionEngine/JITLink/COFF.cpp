@@ -137,10 +137,10 @@ Symbol *GetImageBaseSymbol::operator()(LinkGraph &G) {
 
   // __ImageBase is only ever external (generic platform) or absolute (COFFPlatform).
   auto IBN = G.intern(ImageBaseName);
-  ImageBase = G.findExternalSymbolByName(IBN);
+  ImageBase = G.findAbsoluteSymbolByName(IBN);
   if (*ImageBase)
     return *ImageBase;
-  ImageBase = G.findAbsoluteSymbolByName(IBN);
+  ImageBase = G.findExternalSymbolByName(IBN);
   if (*ImageBase)
     return *ImageBase;
 
