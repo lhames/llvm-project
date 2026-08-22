@@ -384,7 +384,7 @@ Error synthesizeIATEntries_COFF_x86_64(LinkGraph &G) {
     return nullptr;
   };
 
-  Section &IATSec = G.createSection("$__IAT", orc::MemProt::Read);
+  Section &IATSec = G.createSection(COFFIATSectionName, orc::MemProt::Read);
 
   for (auto *Imp : Imps) {
     orc::SymbolStringPtr Base =

@@ -18,6 +18,9 @@
 namespace llvm {
 namespace jitlink {
 
+/// Section name for the synthesized Import Address Table.
+constexpr StringRef COFFIATSectionName = "$__IAT";
+
 /// Create a LinkGraph from an COFF relocatable object.
 ///
 /// Note: The graph does not take ownership of the underlying buffer, nor copy
