@@ -448,16 +448,6 @@ enum EdgeKind_x86_64 : Edge::Kind {
   ///
   SecRel32,
 
-  /// A 16-bit section index relocation.
-  ///
-  /// The value written is the 1-based index of the section containing the
-  /// target symbol.
-  ///
-  /// Fixup expression:
-  ///   Fixup <- Target + Addend : uint16
-  ///
-  SectionIdx16,
-
   // First platform specific relocation.
   FirstPlatformRelocation
 };

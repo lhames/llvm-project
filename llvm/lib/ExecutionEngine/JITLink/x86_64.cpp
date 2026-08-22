@@ -78,8 +78,6 @@ const char *getEdgeKindName(Edge::Kind K) {
     return "RequestTLVPAndTransformToPCRel32TLVPLoadREXRelaxable";
   case SecRel32:
     return "SecRel32";
-  case SectionIdx16:
-    return "SectionIdx16";
   default:
     return getGenericEdgeKindName(K);
   }

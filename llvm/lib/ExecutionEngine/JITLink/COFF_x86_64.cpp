@@ -137,7 +137,7 @@ private:
       break;
     }
     case COFF::RelocationTypeAMD64::IMAGE_REL_AMD64_SECTION: {
-      Kind = x86_64::SectionIdx16;
+      Kind = x86_64::Pointer16;
       Addend = *reinterpret_cast<const support::little16_t *>(FixupPtr);
       uint64_t SectionIdx = 0;
       if (COFFSymbol.isAbsolute())
@@ -198,10 +198,6 @@ public:
           assert(ImageBase && "__ImageBase symbol must be defined");
           E.setAddend(E.getAddend() - ImageBase->getAddress().getValue());
           E.setKind(x86_64::Pointer32);
-          break;
-        }
-        case x86_64::SectionIdx16: {
-          E.setKind(x86_64::Pointer16);
           break;
         }
         case x86_64::SecRel32: {
