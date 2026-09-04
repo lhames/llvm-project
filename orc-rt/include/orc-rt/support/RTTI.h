@@ -52,6 +52,8 @@
 #ifndef ORC_RT_SUPPORT_RTTI_H
 #define ORC_RT_SUPPORT_RTTI_H
 
+#include <cstring>
+#include <string_view>
 #include <type_traits>
 
 namespace orc_rt {
@@ -69,27 +71,40 @@ public:
   virtual ~RTTIRoot() noexcept = default;
 
   /// Returns the class ID for this type.
-  static const void *classID() noexcept { return &ID; }
+  static constexpr const char *RTTIName = "orc_rt::RTTIRoot";
+
+  /// Return the libray ID for this value.
+  ///
+  /// This identifies which dylib produced the value, allowing us to fast-path
+  /// type equality checks within the same library.
+  const void *libraryID() const noexcept { return LibraryID; }
 
   /// Returns the class ID for the dynamic type of this RTTIRoot instance.
-  virtual const void *dynamicClassID() const noexcept = 0;
-
-  /// Returns true if this class's ID matches the given class ID.
-  virtual bool isA(const void *const ClassID) const noexcept {
-    return ClassID == classID();
-  }
+  virtual const char *dynamicRTTIName() const noexcept = 0;
 
   /// Check whether this instance is a subclass of QueryT.
   template <typename QueryT> bool isA() const noexcept {
-    return isA(QueryT::classID());
+    return libraryID() == &ThisLibraryID ? sameDylibIsA(QueryT::RTTIName)
+                                         : differentDylibIsA(QueryT::RTTIName);
   }
 
   static bool classof(const RTTIRoot *R) noexcept { return R->isA<RTTIRoot>(); }
 
-private:
-  virtual void anchor() noexcept;
+protected:
+  /// Fast-path isA for values produced by this dylib.
+  virtual bool sameDylibIsA(const char *const ClassName) const noexcept {
+    return ClassName == RTTIName;
+  }
 
-  static char ID;
+  /// Slow-path isA for values produced by different dylibs.
+  virtual bool differentDylibIsA(const char *const ClassName) const noexcept {
+    return strcmp(ClassName, RTTIName) == 0;
+  }
+
+private:
+  static char ThisLibraryID;
+  const char *const LibraryID = &ThisLibraryID;
+  virtual void anchor() noexcept;
 };
 
 /// Inheritance utility for extensible RTTI.
@@ -102,10 +117,14 @@ private:
 /// newly introduced type, and the *second* argument is the parent class.
 ///
 /// class MyType : public RTTIExtends<MyType, RTTIRoot> {
+/// public:
+///   constexpr const char *RTTIName = "MyType";
 ///   ...
 /// };
 ///
 /// class MyDerivedType : public RTTIExtends<MyDerivedType, MyType> {
+/// public:
+///   constexpr const char *RTTIName = "MyDerivedType";
 ///   ...
 /// };
 ///
@@ -115,25 +134,31 @@ public:
                 "RTTIExtends should not be used to define orc_rt custom error "
                 "types, use ErrorExtends instead");
 
-  // Inherit constructors and isA methods from ParentT.
-  using ParentT::isA;
+  // Inherit constructors from ParentT.
   using ParentT::ParentT;
 
-  static char ID;
-
-  static const void *classID() noexcept { return &ThisT::ID; }
-
-  const void *dynamicClassID() const noexcept override { return &ThisT::ID; }
-
-  bool isA(const void *const ClassID) const noexcept override {
-    return ClassID == classID() || ParentT::isA(ClassID);
+  const char *dynamicRTTIName() const noexcept override {
+    static_assert(std::string_view(ThisT::RTTIName) !=
+                      std::string_view(ParentT::RTTIName),
+                  "ThisT must define its own RTTIName, distinct from "
+                  "ParentT::RTTIName (did you forget to shadow it, or copy "
+                  "the parent's string literal instead of writing a new "
+                  "one?)");
+    return ThisT::RTTIName;
   }
 
   static bool classof(const RTTIRoot *R) noexcept { return R->isA<ThisT>(); }
-};
 
-template <typename ThisT, typename ParentT>
-char RTTIExtends<ThisT, ParentT>::ID = 0;
+protected:
+  bool sameDylibIsA(const char *const ClassName) const noexcept override {
+    return ClassName == ThisT::RTTIName || ParentT::sameDylibIsA(ClassName);
+  }
+
+  bool differentDylibIsA(const char *const ClassName) const noexcept override {
+    return strcmp(ClassName, ThisT::RTTIName) == 0 ||
+           ParentT::differentDylibIsA(ClassName);
+  }
+};
 
 /// Returns true if the given value is an instance of the template type
 /// parameter.

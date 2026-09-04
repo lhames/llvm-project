@@ -14,7 +14,7 @@
 
 namespace orc_rt {
 
-char RTTIRoot::ID = 0;
+char RTTIRoot::ThisLibraryID = 0;
 void RTTIRoot::anchor() noexcept {}
 
 } // namespace orc_rt

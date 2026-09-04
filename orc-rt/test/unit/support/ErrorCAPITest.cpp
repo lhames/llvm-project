@@ -115,7 +115,7 @@ TEST(ErrorCAPITest, StringErrorTypeIdConsistent) {
 // Test that C API type ID matches C++ StringError class ID.
 TEST(ErrorCAPITest, StringErrorTypeIdMatchesCpp) {
   orc_rt_Error_TypeId CTypeId = orc_rt_StringError_getTypeId();
-  const void *CppTypeId = StringError::classID();
+  const void *CppTypeId = StringError::RTTIName;
 
   EXPECT_EQ(CTypeId, CppTypeId);
 }
@@ -147,6 +147,8 @@ TEST(ErrorCAPITest, MultipleErrors) {
 class CustomCAPITestError
     : public ErrorExtends<CustomCAPITestError, ErrorInfoBase> {
 public:
+  static constexpr const char *RTTIName = "::CustomCAPITestError";
+
   CustomCAPITestError(int Code) : Code(Code) {}
   std::string toString() const noexcept override {
     return "CustomCAPITestError: " + std::to_string(Code);
@@ -167,7 +169,7 @@ TEST(ErrorCAPITest, CustomErrorTypeId) {
   EXPECT_NE(TypeId, orc_rt_StringError_getTypeId());
 
   // Should match the C++ class ID.
-  EXPECT_EQ(TypeId, CustomCAPITestError::classID());
+  EXPECT_EQ(TypeId, CustomCAPITestError::RTTIName);
 
   char *Msg = orc_rt_Error_toString(ErrRef);
   EXPECT_STREQ(Msg, "CustomCAPITestError: 42");

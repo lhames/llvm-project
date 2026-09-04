@@ -30,6 +30,7 @@ add_orc_rt_unittest(CoreTests
   support/MacroUtilsTest.cpp
   support/MemoryFlagsTest.cpp
   support/ProxyTest.cpp
+  support/RTTICrossDylibTest.cpp
   support/RTTITest.cpp
   support/StringExtrasTest.cpp
   support/StringPoolTest.cpp
@@ -91,3 +92,15 @@ set_target_properties(NativeDylibManagerTestLib PROPERTIES
 target_compile_definitions(CoreTests PRIVATE
   "NDM_TEST_LIB_PATH=\"$<TARGET_FILE:NativeDylibManagerTestLib>\"")
 add_dependencies(CoreTests NativeDylibManagerTestLib)
+
+# Build a shared library for RTTICrossDylibTest. It links its own copy of
+# orc-rt-bedrock, giving it a LibraryID distinct from CoreTests's, so the
+# test exercises RTTI identity across a real library boundary rather than
+# simulating one within a single binary. CoreTests links it directly, the
+# same way any other consumer of orc-rt would.
+add_library(RTTICrossDylibTestLib SHARED
+  Inputs/RTTICrossDylibTestLib.cpp)
+set_target_properties(RTTICrossDylibTestLib PROPERTIES
+  PREFIX "")
+target_link_libraries(RTTICrossDylibTestLib PRIVATE orc-rt-bedrock)
+target_link_libraries(CoreTests PRIVATE RTTICrossDylibTestLib)
