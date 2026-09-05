@@ -10,10 +10,10 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "orc-rt-internal/bedrock/sys/TargetTriple.h"
+#include "orc-rt-internal/support/sys/TargetTriple.h"
 
-#include "orc-rt-internal/bedrock/TargetDetails.h"
 #include "orc-rt-internal/support/StringExtras.h"
+#include "orc-rt-internal/support/TargetDetails.h"
 
 #include <TargetConditionals.h>
 #include <cstdlib>

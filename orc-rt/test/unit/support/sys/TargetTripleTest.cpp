@@ -6,11 +6,11 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// Tests for orc-rt's bedrock/sys/TargetTriple.h APIs.
+// Tests for orc-rt's support/sys/TargetTriple.h APIs.
 //
 //===----------------------------------------------------------------------===//
 
-#include "orc-rt-internal/bedrock/sys/TargetTriple.h"
+#include "orc-rt-internal/support/sys/TargetTriple.h"
 #include "gtest/gtest.h"
 
 #include <algorithm>

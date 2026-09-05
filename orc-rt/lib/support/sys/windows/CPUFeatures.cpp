@@ -1,4 +1,4 @@
-#include "orc-rt-internal/bedrock/sys/CPUFeatures.h"
+#include "orc-rt-internal/support/sys/CPUFeatures.h"
 
 namespace orc_rt::sys {
 

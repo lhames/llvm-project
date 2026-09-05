@@ -6,7 +6,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "orc-rt-internal/bedrock/sys/TargetTriple.h"
+#include "orc-rt-internal/support/sys/TargetTriple.h"
 
 namespace orc_rt::sys {
 

@@ -7,12 +7,12 @@
 //===----------------------------------------------------------------------===//
 //
 // Exactly one implementation is compiled into the runtime, chosen by the
-// build: see lib/bedrock/sys/darwin/CPUFeatures.cpp and its siblings.
+// build: see lib/support/sys/darwin/CPUFeatures.cpp and its siblings.
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef ORC_RT_INTERNAL_BEDROCK_SYS_CPUFEATURES_H
-#define ORC_RT_INTERNAL_BEDROCK_SYS_CPUFEATURES_H
+#ifndef ORC_RT_INTERNAL_SUPPORT_SYS_CPUFEATURES_H
+#define ORC_RT_INTERNAL_SUPPORT_SYS_CPUFEATURES_H
 
 #include <string_view>
 #include <vector>
@@ -20,9 +20,9 @@
 namespace orc_rt::sys {
 
 /// Returns the host's CPU feature names, using LLVM's SubtargetFeatures
-/// naming (see orc-rt-internal/bedrock/TargetDetails.h).
+/// naming (see orc-rt-internal/support/TargetDetails.h).
 std::vector<std::string_view> detectTargetCPUFeatures();
 
 } // namespace orc_rt::sys
 
-#endif // ORC_RT_INTERNAL_BEDROCK_SYS_CPUFEATURES_H
+#endif // ORC_RT_INTERNAL_SUPPORT_SYS_CPUFEATURES_H

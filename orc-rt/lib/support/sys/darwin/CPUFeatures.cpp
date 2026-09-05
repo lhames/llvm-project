@@ -5,9 +5,9 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
-#include "orc-rt-internal/bedrock/sys/CPUFeatures.h"
+#include "orc-rt-internal/support/sys/CPUFeatures.h"
 
-#include "orc-rt-internal/bedrock/TargetDetails.h"
+#include "orc-rt-internal/support/TargetDetails.h"
 
 #include <cstdint>
 #include <sys/sysctl.h>

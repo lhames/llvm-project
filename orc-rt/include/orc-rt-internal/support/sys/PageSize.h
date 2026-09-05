@@ -7,12 +7,12 @@
 //===----------------------------------------------------------------------===//
 //
 // Exactly one implementation is compiled into the runtime, chosen by the
-// build: see lib/bedrock/sys/posix/PageSize.cpp and its siblings.
+// build: see lib/support/sys/posix/PageSize.cpp and its siblings.
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef ORC_RT_INTERNAL_BEDROCK_SYS_PAGESIZE_H
-#define ORC_RT_INTERNAL_BEDROCK_SYS_PAGESIZE_H
+#ifndef ORC_RT_INTERNAL_SUPPORT_SYS_PAGESIZE_H
+#define ORC_RT_INTERNAL_SUPPORT_SYS_PAGESIZE_H
 
 #include "orc-rt/support/Error.h"
 
@@ -26,4 +26,4 @@ Expected<size_t> detectPageSize() noexcept;
 
 } // namespace orc_rt::sys
 
-#endif // ORC_RT_INTERNAL_BEDROCK_SYS_PAGESIZE_H
+#endif // ORC_RT_INTERNAL_SUPPORT_SYS_PAGESIZE_H

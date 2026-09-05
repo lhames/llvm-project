@@ -9,7 +9,7 @@
 // The host dynamic-library operations that NativeDylibManager is built on.
 //
 // Exactly one implementation is compiled into the runtime, chosen by the build:
-// see lib/bedrock/sys/posix/DynamicLibrary.cpp and its siblings. A target with
+// see lib/support/sys/posix/DynamicLibrary.cpp and its siblings. A target with
 // no dynamic loader has no native dylib manager.
 //
 //===----------------------------------------------------------------------===//

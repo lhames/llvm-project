@@ -7,12 +7,12 @@
 //===----------------------------------------------------------------------===//
 //
 // Exactly one implementation is compiled into the runtime, chosen by the
-// build: see lib/bedrock/sys/darwin/TargetTriple.cpp and its siblings.
+// build: see lib/support/sys/darwin/TargetTriple.cpp and its siblings.
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef ORC_RT_INTERNAL_BEDROCK_SYS_TARGETTRIPLE_H
-#define ORC_RT_INTERNAL_BEDROCK_SYS_TARGETTRIPLE_H
+#ifndef ORC_RT_INTERNAL_SUPPORT_SYS_TARGETTRIPLE_H
+#define ORC_RT_INTERNAL_SUPPORT_SYS_TARGETTRIPLE_H
 
 #include <string>
 
@@ -24,4 +24,4 @@ std::string detectTargetTriple() noexcept;
 
 } // namespace orc_rt::sys
 
-#endif // ORC_RT_INTERNAL_BEDROCK_SYS_TARGETTRIPLE_H
+#endif // ORC_RT_INTERNAL_SUPPORT_SYS_TARGETTRIPLE_H

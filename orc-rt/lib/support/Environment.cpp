@@ -15,7 +15,7 @@
 #define _GNU_SOURCE
 #endif
 
-#include "orc-rt-internal/bedrock/Environment.h"
+#include "orc-rt-internal/support/Environment.h"
 
 #include <stdlib.h>
 

@@ -47,7 +47,9 @@ add_orc_rt_unittest(CoreTests
   support/sps/SPSWrapperFunctionTest.cpp
   support/sps/SimplePackedSerializationTest.cpp
 
+  support/sys/CPUFeaturesTest.cpp
   support/sys/ErrnoTest.cpp
+  support/sys/TargetTripleTest.cpp
 
   bedrock/BootstrapInfoTest.cpp
   bedrock/ExecutorProcessInfoTest.cpp
@@ -66,9 +68,6 @@ add_orc_rt_unittest(CoreTests
   bedrock/sps/NativeDylibManagerSPSCITest.cpp
   bedrock/sps/SimpleNativeMemoryMapSPSCITest.cpp
   bedrock/sps/SimpleRemoteCATest.cpp
-
-  bedrock/sys/CPUFeaturesTest.cpp
-  bedrock/sys/TargetTripleTest.cpp
 
   tools/OptionParserTest.cpp
 

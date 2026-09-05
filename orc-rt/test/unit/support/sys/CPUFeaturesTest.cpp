@@ -6,11 +6,11 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// Tests for orc-rt's bedrock/sys/CPUFeatures.h APIs.
+// Tests for orc-rt's support/sys/CPUFeatures.h APIs.
 //
 //===----------------------------------------------------------------------===//
 
-#include "orc-rt-internal/bedrock/sys/CPUFeatures.h"
+#include "orc-rt-internal/support/sys/CPUFeatures.h"
 #include "gtest/gtest.h"
 
 using namespace orc_rt;

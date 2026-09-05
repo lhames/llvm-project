@@ -10,7 +10,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "orc-rt-internal/bedrock/sys/PageSize.h"
+#include "orc-rt-internal/support/sys/PageSize.h"
 #include "orc-rt-internal/support/StringExtras.h"
 #include "orc-rt-internal/support/sys/Errno.h"
 #include "orc-rt/support/bit.h"
