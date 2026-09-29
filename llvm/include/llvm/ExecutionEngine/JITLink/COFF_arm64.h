@@ -1,4 +1,4 @@
-//===--- COFF_arm64.h - JIT link functions for COFF/arm64 ---*- C++ -*-===//
+//===----- COFF_arm64.h - JIT link functions for COFF/arm64 -----*- C++ -*-===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -24,7 +24,8 @@ namespace jitlink {
 /// its contents. The caller is responsible for ensuring that the object buffer
 /// outlives the graph.
 Expected<std::unique_ptr<LinkGraph>>
-createLinkGraphFromCOFFObject_arm64(MemoryBufferRef ObjectBuffer);
+createLinkGraphFromCOFFObject_arm64(MemoryBufferRef ObjectBuffer,
+                                    std::shared_ptr<orc::SymbolStringPool> SSP);
 
 /// jit-link the given object buffer, which must be a COFF arm64 object file.
 void link_COFF_arm64(std::unique_ptr<LinkGraph> G,

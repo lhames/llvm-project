@@ -55,7 +55,7 @@ public:
 
 private:
   Error applyFixup(LinkGraph &G, Block &B, const Edge &E) const {
-    return aarch64::applyFixup(G, B, E);
+    return aarch64::applyFixup<endianness::little>(G, B, E, nullptr);
   }
 };
 
@@ -72,7 +72,6 @@ private:
     return Error::success();
   }
 
-#pragma optimize("", off)
   Error addSingleRelocation(const object::RelocationRef &Rel,
                             const object::SectionRef &FixupSect,
                             Block &BlockToFix) {
@@ -158,12 +157,12 @@ private:
 
     return Error::success();
   }
-#pragma optimize("", on)
 
 public:
-  COFFLinkGraphBuilder_arm64(const object::COFFObjectFile &Obj, const Triple T,
-                             const SubtargetFeatures Features)
-      : COFFLinkGraphBuilder(Obj, std::move(T), std::move(Features),
+  COFFLinkGraphBuilder_arm64(const object::COFFObjectFile &Obj,
+                             std::shared_ptr<orc::SymbolStringPool> SSP,
+                             Triple TT, const SubtargetFeatures Features)
+    : COFFLinkGraphBuilder(Obj, std::move(SSP), std::move(TT), std::move(Features),
                              getCOFFARM64RelocationKindName) {}
 };
 
@@ -303,7 +302,8 @@ const char *getCOFFARM64RelocationKindName(Edge::Kind R) {
 }
 
 Expected<std::unique_ptr<LinkGraph>>
-createLinkGraphFromCOFFObject_arm64(MemoryBufferRef ObjectBuffer) {
+createLinkGraphFromCOFFObject_arm64(MemoryBufferRef ObjectBuffer,
+                                    std::shared_ptr<orc::SymbolStringPool> SSP) {
   LLVM_DEBUG({
     dbgs() << "Building jitlink graph for new input "
            << ObjectBuffer.getBufferIdentifier() << "...\n";
@@ -317,8 +317,8 @@ createLinkGraphFromCOFFObject_arm64(MemoryBufferRef ObjectBuffer) {
   if (!Features)
     return Features.takeError();
 
-  return COFFLinkGraphBuilder_arm64(**COFFObj, (*COFFObj)->makeTriple(),
-                                    std::move(*Features))
+  return COFFLinkGraphBuilder_arm64(**COFFObj, std::move(SSP),
+                                    (*COFFObj)->makeTriple(), std::move(*Features))
       .buildGraph();
 }
 
